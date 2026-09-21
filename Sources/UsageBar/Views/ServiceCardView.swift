@@ -9,6 +9,12 @@ struct ServiceCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+            if runtime.isCurrentAccount {
+                Text("当前使用")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(Color(hex: "#10A37F"))
+                    .padding(.bottom, 8)
+            }
             content
         }
         .padding(.horizontal, 16)
@@ -57,9 +63,13 @@ struct ServiceCardView: View {
             usageBody(usage)
             if display.updatedAt { footerOK(fetchedAt) }
 
-        case .stale(let usage, let cachedAt, _):
+        case .stale(let usage, let cachedAt, let error):
             usageBody(usage)
             footerStale(cachedAt)
+            Text(error)
+                .font(.system(size: 10))
+                .foregroundColor(Theme.amber)
+                .fixedSize(horizontal: false, vertical: true)
 
         case .error(let msg):
             Text(msg)
@@ -81,11 +91,46 @@ struct ServiceCardView: View {
     // 按数据形态选择渲染:余额型(PhanRouter)或用量窗口型(Claude/GPT)。
     @ViewBuilder
     private func usageBody(_ usage: Usage) -> some View {
-        if let b = usage.balance {
+        if let info = usage.apiInfo {
+            ProviderAPICardBody(info: info, display: display, accent: accent)
+        } else if let b = usage.balance {
             BalanceCardBody(info: b, accent: accent, display: display)
         } else {
             windows(usage.windows)
+            if let credits = usage.resetCredits {
+                resetCreditsBody(credits)
+            } else if runtime.config.fetcher == .codexWham {
+                Text("重置机会暂不可用，请稍后刷新")
+                    .font(.system(size: 10)).foregroundColor(Theme.subGray).padding(.top, 12)
+            }
         }
+    }
+
+    private func resetCreditsBody(_ info: ResetCredits) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("额度重置机会 · 剩余 \(info.availableCount) 次")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(Theme.labelGray)
+            if let count = info.applicableCount, count != info.availableCount {
+                Text("当前套餐可用 \(count) 次")
+            }
+            if let credits = info.credits {
+                ForEach(Array(credits.enumerated()), id: \.offset) { index, credit in
+                    Text("第 \(index + 1) 次 · " + (credit.expiresAt.map {
+                        $0.formatted(.dateTime.year().month().day().hour().minute()) + " 到期"
+                    } ?? "到期时间未知") + (credit.applicable ? "" : " · 当前套餐不适用"))
+                }
+                if credits.count != info.availableCount {
+                    Text("部分到期明细暂不可用")
+                }
+            } else if info.availableCount > 0 {
+                Text("到期明细暂不可用，请稍后刷新")
+            }
+        }
+        .font(.system(size: 10))
+        .foregroundColor(Theme.subGray)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, 12)
     }
 
     private func windows(_ ws: [UsageWindow]) -> some View {

@@ -7,6 +7,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private let store: UsageStore
+    private let previewHeight: CGFloat?
     private var cancellables = Set<AnyCancellable>()
 
     // 手机中转服务
@@ -15,8 +16,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let relayCache = NSLock()
     private var relayJSON: Data = Data("{\"services\":[]}".utf8)
 
-    init(store: UsageStore) {
+    init(store: UsageStore, previewHeight: CGFloat? = nil) {
         self.store = store
+        self.previewHeight = previewHeight
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
@@ -45,6 +47,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.contentViewController = host
 
         // 手机中转服务：启动 RelayServer，snapshotProvider 只读缓存（线程安全）。
+        guard previewHeight == nil else { return }
         let relaySettings = RelayConfigStore.loadOrCreate()
         // 启动时先算一次初值（主线程，states 已就绪）。
         relayJSON = relayPayloadJSON(states: store.states, lastUpdated: store.lastUpdated)
@@ -80,12 +83,18 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         }
     }
 
-    private func togglePopover() {
+    func togglePopover(relativeTo previewAnchor: NSView? = nil) {
         guard let button = statusItem.button else { return }
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            store.synchronizeCurrentAccount()
+            let height = previewHeight ?? max(160, (button.window?.screen?.visibleFrame.height ?? 720) - 32)
+            let host = NSHostingController(rootView: PopoverRootView(availableHeight: height, showsRelayPanel: previewHeight == nil).environmentObject(store))
+            host.sizingOptions = [.preferredContentSize]
+            popover.contentViewController = host
+            let anchor = previewAnchor ?? button
+            popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
             Task { await store.refresh() }
         }

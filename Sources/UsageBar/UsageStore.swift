@@ -17,22 +17,162 @@ final class UsageStore: ObservableObject {
     // service id → (告警 key → 严重度)
     private var activeAlertsByService: [String: [String: AlertSeverity]] = [:]
 
-    init(config: AppConfig) {
-        self.config = config
-        let enabled = config.services.filter { $0.enabled }
-        // 启动时先用缓存填充,避免空白。
-        self.states = enabled.map { cfg in
-            if let cached = UsageCache.read(cfg.id) {
-                return ServiceRuntime(config: cfg, status: .stale(cached.usage, cachedAt: cached.ts, error: "加载中…"))
-            }
-            return ServiceRuntime(config: cfg, status: .loading)
+    @Published private(set) var currentAccountID: String?
+    @Published private(set) var accountError: String?
+    @Published private(set) var accountNotice: String?
+    private var currentCredentials: CredentialStore.CodexCreds?
+    private var identityTimer: Timer?
+    private let dependencies: UsageDependencies
+    private var generations: [String: UUID] = [:]
+    private var refreshAgain = false
+    @Published private(set) var isSwitchingAccount = false
+
+    func needsCLILogin(_ id: String) -> Bool {
+        dependencies.savedCredentials(id)?.canLoginToCLI != true
+    }
+
+    @discardableResult
+    func switchCLIAccount(_ id: String) -> Bool {
+        guard !isSwitchingAccount, config.codexAccounts.contains(where: { $0.id == id }) else { return false }
+        accountNotice = nil
+        accountError = nil
+        guard let creds = dependencies.savedCredentials(id), creds.canLoginToCLI else {
+            accountError = "请先重新登录该账号以补齐 CLI 登录信息"
+            return false
+        }
+        isSwitchingAccount = true
+        defer { isSwitchingAccount = false }
+        do {
+            try dependencies.switchCredentials(creds)
+            synchronizeCurrentAccount()
+            guard currentAccountID == id else { throw CodexAccountSwitcher.SwitchError.changed }
+            accountNotice = "已切换。请新开或重新打开 Codex CLI 会话使用该账号。"
+            Task { await refresh() }
+            return true
+        } catch {
+            synchronizeCurrentAccount()
+            accountError = error.localizedDescription
+            return false
         }
     }
 
+    init(config: AppConfig, dependencies: UsageDependencies = UsageDependencies()) {
+        self.config = config
+        self.dependencies = dependencies
+        self.states = []
+        synchronizeCurrentAccount()
+        rebuildStates()
+    }
+
+    @discardableResult
+    func synchronizeCurrentAccount() -> Bool {
+        let next: CredentialStore.CodexCreds?
+        if case .ok(let creds) = dependencies.currentCredentials() { next = creds } else { next = nil }
+        guard next != currentCredentials else { return false }
+        let previous = currentAccountID
+        currentCredentials = next
+        currentAccountID = next?.identity
+        for id in [previous, currentAccountID].compactMap({ $0 }) { generations[id] = UUID() }
+        rebuildStates()
+        refreshActiveAlertsFromCurrentStates()
+        return true
+    }
+
+    func addCurrentAccount() {
+        accountNotice = nil
+        synchronizeCurrentAccount()
+        guard let creds = currentCredentials else {
+            accountError = "未找到可识别的 Codex 登录，请先登录订阅账号"
+            return
+        }
+        saveAccount(creds)
+    }
+
+    func importAccount(from url: URL) {
+        accountNotice = nil
+        accountError = nil
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        switch dependencies.importCredentials(url) {
+        case .ok(let creds): saveAccount(creds)
+        case .missingFile: accountError = "所选目录未找到 auth.json，请先在该目录完成 Codex 登录"
+        case .parseError: accountError = "无法读取登录文件，请选择 Codex 登录目录或有效的 auth.json"
+        case .incomplete: accountError = "登录文件缺少订阅账号身份，请使用 ChatGPT 账号登录后重试"
+        }
+    }
+
+    @discardableResult
+    func saveAccount(_ creds: CredentialStore.CodexCreds, expectedID: String? = nil) -> Bool {
+        accountNotice = nil
+        if let expectedID, expectedID != creds.identity {
+            accountError = "登录的账号不匹配，请选择原账号重新登录"
+            return false
+        }
+        accountError = nil
+        let previous = dependencies.savedCredentials(creds.identity)
+        do {
+            try dependencies.saveCredentials(creds)
+            var next = config
+            if !next.codexAccounts.contains(where: { $0.id == creds.identity }) {
+                next.codexAccounts.append(CodexAccount(id: creds.identity, name: creds.displayName))
+            }
+            if let index = next.codexAccounts.firstIndex(where: { $0.id == creds.identity }) {
+                next.codexAccounts[index].name = creds.displayName
+            }
+            guard applyConfig(next) else {
+                if let previous { try dependencies.saveCredentials(previous) }
+                else { try dependencies.removeCredentials(creds.identity) }
+                accountError = configSaveError
+                return false
+            }
+            generations[creds.identity] = UUID()
+            accountError = nil
+            accountNotice = "账号已添加／更新"
+            Task { await refresh() }
+            return true
+        } catch { accountError = error.localizedDescription; return false }
+    }
+
+    func accountName(_ id: String) -> String {
+        let creds = id == currentAccountID ? currentCredentials : dependencies.savedCredentials(id)
+        return creds?.displayName ?? "Codex 账号 " + id.suffix(6)
+    }
+
+    func removeAccount(_ id: String) {
+        accountNotice = nil
+        guard config.codexAccounts.contains(where: { $0.id == id }) else { return }
+        var next = config
+        next.codexAccounts.removeAll { $0.id == id }
+        do {
+            // Persist first: a failed config write must never erase the saved login.
+            try dependencies.saveConfig(next)
+            do {
+                try dependencies.removeCredentials(id)
+            } catch {
+                try dependencies.saveConfig(config)
+                throw error
+            }
+            config = next
+            generations[id] = UUID()
+            rebuildStates()
+            refreshActiveAlertsFromCurrentStates()
+            configSaveError = nil
+            accountError = nil
+        } catch { accountError = error.localizedDescription }
+    }
+
     func start() {
-        if config.alerts.enabled { AlertNotifier.requestAuthorizationIfNeeded() }
+        if config.alerts.enabled { dependencies.requestNotificationAuthorization() }
         Task { await refresh() }
         scheduleTimer()
+        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.synchronizeCurrentAccount() else { return }
+                await self.refresh()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        identityTimer = timer
     }
 
     func setServiceEnabled(_ id: String, enabled: Bool) {
@@ -67,10 +207,10 @@ final class UsageStore: ObservableObject {
     func setAlertsEnabled(_ enabled: Bool) {
         var next = config
         next.alerts.enabled = enabled
-        applyConfig(next)
+        guard applyConfig(next) else { return }
         if !enabled { clearActiveAlerts() }
         if enabled {
-            AlertNotifier.requestAuthorizationIfNeeded()
+            dependencies.requestNotificationAuthorization()
             refreshActiveAlertsFromCurrentStates()
         }
     }
@@ -119,84 +259,124 @@ final class UsageStore: ObservableObject {
         timer = t
     }
 
-    private func applyConfig(_ next: AppConfig) {
-        config = next
-        rebuildStates()
-        scheduleTimer()
+    @discardableResult
+    private func applyConfig(_ next: AppConfig) -> Bool {
         do {
-            try AppConfigStore.save(next)
+            try dependencies.saveConfig(next)
+            config = next
+            rebuildStates()
+            refreshActiveAlertsFromCurrentStates()
+            if timer != nil { scheduleTimer() }
             configSaveError = nil
+            return true
         } catch {
             configSaveError = "配置保存失败:\(error.localizedDescription)"
+            return false
         }
     }
 
     private func rebuildStates() {
         var existing: [String: ServiceStatus] = [:]
         for rt in states { existing[rt.id] = rt.status }
-        states = config.services.filter { $0.enabled }.map { cfg in
-            if let status = existing[cfg.id] {
-                return ServiceRuntime(config: cfg, status: status)
+        var configs: [ServiceConfig] = []
+        for cfg in config.services where cfg.enabled {
+            guard cfg.fetcher == .codexWham else { configs.append(cfg); continue }
+            // Codex is a channel template; account cards have identity-specific IDs.
+            guard !configs.contains(where: { $0.fetcher == .codexWham }) else { continue }
+            var accounts = config.codexAccounts
+            if let id = currentAccountID, !accounts.contains(where: { $0.id == id }) {
+                accounts.append(CodexAccount(id: id, name: accountName(id)))
             }
-            if let cached = UsageCache.read(cfg.id) {
-                return ServiceRuntime(config: cfg, status: .stale(cached.usage, cachedAt: cached.ts, error: "加载中…"))
+            if accounts.isEmpty {
+                configs.append(ServiceConfig(id: "codex-unavailable", title: "Codex", accent: cfg.accent,
+                                             category: .subscription, fetcher: .codexWham, display: cfg.display))
             }
-            return ServiceRuntime(config: cfg, status: .loading)
+            let names = Dictionary(uniqueKeysWithValues: Set(accounts.map(\.id)).map { ($0, accountName($0)) })
+            var seen = Set<String>()
+            for account in accounts where seen.insert(account.id).inserted {
+                let name = names[account.id]!
+                let duplicate = names.values.filter { $0 == name }.count > 1
+                let suffix = duplicate ? " · " + account.id.suffix(6) : ""
+                let unsaved = config.codexAccounts.contains { $0.id == account.id } ? "" : "（未保存）"
+                configs.append(ServiceConfig(id: account.id, title: "Codex · " + name + suffix + unsaved, accent: cfg.accent,
+                                             category: .subscription, fetcher: .codexWham, display: cfg.display))
+            }
         }
-        activeAlertsByService = activeAlertsByService.filter { serviceID, _ in
-            states.contains { $0.id == serviceID }
+        if let index = configs.firstIndex(where: { $0.id == currentAccountID }) {
+            configs.insert(configs.remove(at: index), at: 0)
         }
+        let ids = Set(configs.map(\.id))
+        generations = generations.filter { ids.contains($0.key) }
+        states = configs.map { cfg in
+            if generations[cfg.id] == nil { generations[cfg.id] = UUID() }
+            let status: ServiceStatus
+            if let old = existing[cfg.id] { status = old }
+            else if let cached = dependencies.readCache(cfg.id) {
+                status = .stale(cached.usage, cachedAt: cached.ts, error: "加载中…")
+            } else { status = .loading }
+            return ServiceRuntime(config: cfg, status: status, isCurrentAccount: cfg.id == currentAccountID)
+        }
+        activeAlertsByService = activeAlertsByService.filter { ids.contains($0.key) }
         publishActiveAlerts()
     }
 
     func refresh() async {
-        guard !isRefreshing else { return }
+        synchronizeCurrentAccount()
+        guard !isRefreshing else { refreshAgain = true; return }
         isRefreshing = true
         defer { isRefreshing = false }
-
-        // 各服务独立取数,并发执行,一个失败不影响另一个。
-        await withTaskGroup(of: (String, FetchOutcome).self) { group in
-            for rt in states {
-                guard let fetcher = makeFetcher(for: rt.config) else {
-                    apply(.failure("未支持的取数类型:\(rt.config.fetcher.rawValue)"), to: rt.config.id)
-                    continue
+        repeat {
+            refreshAgain = false
+            let fetch = dependencies.fetch
+            let jobs = states.map { rt in
+                let credentials = rt.config.fetcher == .codexWham
+                    ? (rt.id == currentAccountID ? currentCredentials : dependencies.savedCredentials(rt.id)) : nil
+                return (rt.config, credentials, generations[rt.id]!)
+            }
+            await withTaskGroup(of: (String, UUID, FetchOutcome).self) { group in
+                var iterator = jobs.makeIterator()
+                func enqueue() {
+                    guard let (cfg, creds, generation) = iterator.next() else { return }
+                    group.addTask { (cfg.id, generation, await fetch(cfg, creds)) }
                 }
-                group.addTask {
-                    let outcome = await fetcher.fetch()
-                    return (rt.config.id, outcome)
+                for _ in 0..<min(4, jobs.count) { enqueue() }
+                for await (id, generation, outcome) in group {
+                    if synchronizeCurrentAccount() { refreshAgain = true }
+                    if generations[id] == generation { apply(outcome, to: id) }
+                    enqueue()
                 }
             }
-            for await (id, outcome) in group {
-                apply(outcome, to: id)
-            }
-        }
-        lastUpdated = Date()
+            lastUpdated = Date()
+        } while refreshAgain
     }
 
     private func apply(_ outcome: FetchOutcome, to id: String) {
         guard let idx = states.firstIndex(where: { $0.id == id }) else { return }
         switch outcome {
         case .success(let usage):
-            UsageCache.write(usage, service: id)
+            dependencies.writeCache(usage, id)
             states[idx].status = .ok(usage, fetchedAt: Date())
             updateAlerts(for: states[idx].config, usage: usage, sendNotifications: true)
         case .failure(let msg):
-            if let cached = UsageCache.read(id) {
+            if let cached = dependencies.readCache(id) {
                 states[idx].status = .stale(cached.usage, cachedAt: cached.ts, error: msg)
             } else {
                 states[idx].status = .error(msg)
             }
+            refreshActiveAlertsFromCurrentStates()
         }
     }
 
     private func updateAlerts(for service: ServiceConfig, usage: Usage, sendNotifications: Bool) {
         let alerts = config.alerts
-        guard alerts.enabled, service.category == .subscription else {
+        guard alerts.enabled, service.category == .subscription,
+              service.fetcher != .codexWham || service.id == currentAccountID else {
             activeAlertsByService[service.id] = [:]
             publishActiveAlerts()
             return
         }
-        if let serviceIDs = alerts.serviceIDs, !serviceIDs.contains(service.id) {
+        if let serviceIDs = alerts.serviceIDs, !serviceIDs.contains(service.id),
+           !(service.fetcher == .codexWham && serviceIDs.contains("codex")) {
             activeAlertsByService[service.id] = [:]
             publishActiveAlerts()
             return
@@ -223,8 +403,7 @@ final class UsageStore: ObservableObject {
                 continue
             }
             lastAlertAtByKey[key] = now
-            AlertNotifier.send(title: "\(service.title) 用量提醒",
-                               body: alertBody(service: service, window: window,
+            dependencies.notify("\(service.title) 用量提醒", alertBody(service: service, window: window,
                                                usagePct: usagePct, elapsedPct: elapsedPct,
                                                windowConfig: wcfg))
         }

@@ -24,8 +24,14 @@ private struct RelayBalance: Encodable {
     let balance: Double; let used: Double; let currency: String
     let requestCount: Int?; let models: [RelayModel]
 }
+private struct RelayResetCredit: Encodable { let expiresAt: String?; let applicable: Bool }
+private struct RelayResetCredits: Encodable {
+    let availableCount: Int; let applicableCount: Int?; let credits: [RelayResetCredit]?
+}
 private struct RelayUsage: Encodable {
     let plan: String?; let windows: [RelayWindow]; let balance: RelayBalance?
+    let apiInfo: APIInfo?
+    let resetCredits: RelayResetCredits?
 }
 // status: { kind, usage?, fetchedAt?, cachedAt?, error?, message? }
 private struct RelayStatus: Encodable {
@@ -59,6 +65,8 @@ private func fetcherString(_ f: FetcherKind) -> String {
     case .claudeOAuth: return "claudeOauth"
     case .codexWham:   return "codexWham"
     case .newAPI:      return "newAPI"
+    case .deepseek: return "deepseek"
+    case .yicloud: return "yicloud"
     case .unsupported: return "unsupported"
     }
 }
@@ -71,7 +79,7 @@ private func mapConfig(_ c: ServiceConfig) -> RelayConfig {
         accent: c.accent,
         category: categoryString(c.category),
         fetcher: fetcherString(c.fetcher),
-        credentialFile: c.credentialFile,
+        credentialFile: c.fetcher == .codexWham ? nil : c.credentialFile,
         enabled: c.enabled,
         display: c.display
     )
@@ -85,6 +93,11 @@ private func mapUsage(_ u: Usage) -> RelayUsage {
             RelayBalance(balance: b.balance, used: b.used, currency: b.currency,
                          requestCount: b.requestCount,
                          models: b.models.map { RelayModel(name: $0.name, vendor: $0.vendor) })
+        },
+        apiInfo: u.apiInfo,
+        resetCredits: u.resetCredits.map { r in
+            RelayResetCredits(availableCount: r.availableCount, applicableCount: r.applicableCount,
+                              credits: r.credits?.map { RelayResetCredit(expiresAt: iso($0.expiresAt), applicable: $0.applicable) })
         })
 }
 

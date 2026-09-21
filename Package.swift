@@ -11,6 +11,7 @@ let package = Package(
             swiftSettings: [
                 .unsafeFlags(["-parse-as-library"])
             ]
-        )
+        ),
+        .testTarget(name: "TokenDeckTests", dependencies: ["TokenDeck"])
     ]
 )

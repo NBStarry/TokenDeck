@@ -28,7 +28,7 @@ enum AppConfigStore {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
         let data = try enc.encode(cfg)
-        try data.write(to: url)
+        try data.write(to: url, options: .atomic)
     }
 
     private static func writeDefaultIfNeeded(_ cfg: AppConfig) {

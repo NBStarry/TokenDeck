@@ -79,10 +79,11 @@ struct ClaudeFetcher: UsageFetcher {
 // ─── Codex / GPT ──────────────────────────────────────────────
 struct CodexFetcher: UsageFetcher {
     let serviceID = "codex"
+    var credentials: CredentialStore.CodexCreds? = nil
 
     func fetch() async -> FetchOutcome {
         let creds: CredentialStore.CodexCreds
-        switch CredentialStore.codexCreds() {
+        switch credentials.map(CredentialStore.CodexCredResult.ok) ?? CredentialStore.codexCreds() {
         case .ok(let c): creds = c
         case .missingFile: return .failure("未找到 Codex 认证文件,请先运行 codex login")
         case .parseError:  return .failure("Codex 认证文件解析失败")
@@ -105,7 +106,7 @@ struct CodexFetcher: UsageFetcher {
             return .failure("接口返回无法解析")
         }
         guard let data = json as? [String: Any] else { return .failure("接口返回结构异常") }
-        if status == 401 { return .failure("Codex 登录已过期,运行 codex login 刷新") }
+        if status == 401 { return .failure("Codex 登录已过期，请登录该账号后在设置中添加／更新") }
         if status < 200 || status >= 300 { return .failure("接口请求失败 (HTTP \(status))") }
 
         // 部分情况下接口以 200 返回错误信封。
@@ -113,27 +114,60 @@ struct CodexFetcher: UsageFetcher {
             let code = (err["code"] as? String) ?? ""
             let msg = (err["message"] as? String) ?? ""
             if code.contains("expired") || msg.contains("expired") || (data["status"] as? Int) == 401 {
-                return .failure("Codex 登录已过期,运行 codex login 刷新")
+                return .failure("Codex 登录已过期，请登录该账号后在设置中添加／更新")
             }
-            let reason = msg.isEmpty ? (code.isEmpty ? "未知错误" : code) : msg
-            return .failure("接口返回错误:\(reason)")
+            return .failure("Codex 接口返回错误，请稍后重试")
         }
 
+        // 明细失败不影响用量；只调用 GET，绝不消费重置机会。
+        var detail: [String: Any]?
+        if let (json, code) = try? await Http.getJSON(
+            "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", headers: headers),
+           (200..<300).contains(code) {
+            detail = json as? [String: Any]
+        }
+        return parseUsage(data, resetDetail: detail)
+    }
+
+    func parseUsage(_ data: [String: Any], resetDetail: [String: Any]? = nil) -> FetchOutcome {
         let rl = pickDict(data, "rate_limit", "rate_limits") ?? data
-        let fiveHour = pickDict(rl, "five_hour", "five_hour_limit", "five_hour_rate_limit", "primary")
-            ?? pickDict(rl, "primary_window")
-        let weekly = pickDict(rl, "weekly", "weekly_limit", "weekly_rate_limit", "secondary")
-            ?? pickDict(rl, "secondary_window")
-
+        let primary = pickDict(rl, "five_hour", "five_hour_limit", "five_hour_rate_limit", "primary", "primary_window")
+        let secondary = pickDict(rl, "weekly", "weekly_limit", "weekly_rate_limit", "secondary", "secondary_window")
         var windows: [UsageWindow] = []
-        for (w, label) in [(fiveHour, "5 小时"), (weekly, "周")] {
-            guard let w, let pct = usedPct(w) else { continue }
-            windows.append(UsageWindow(label: label,
-                                       pct: (pct * 10).rounded() / 10,
-                                       resetAt: resetAt(w)))
+        for (raw, fallback) in [(primary, WindowKind.fiveHour), (secondary, WindowKind.weekly)] {
+            guard let raw, let pct = usedPct(raw) else { continue }
+            let kind: WindowKind
+            if let seconds = numeric(raw["limit_window_seconds"]) {
+                guard let match = WindowKind.allCases.first(where: { $0.durationSeconds == seconds }) else { continue }
+                kind = match
+            } else {
+                kind = fallback
+            }
+            windows.append(UsageWindow(label: kind.displayLabel, pct: (pct * 10).rounded() / 10,
+                                       resetAt: resetAt(raw), kind: kind))
         }
-        guard !windows.isEmpty else { return .failure("未解析到用量数据(接口结构可能已变)") }
-        return .success(Usage(plan: capitalizedPlan(data["plan_type"]), windows: windows))
+        guard !windows.isEmpty else { return .failure("未解析到支持的用量窗口(接口结构可能已变)") }
+        return .success(Usage(plan: capitalizedPlan(data["plan_type"]), windows: windows,
+                              resetCredits: parseResetCredits(data, detail: resetDetail)))
+    }
+
+    func parseResetCredits(_ data: [String: Any], detail: [String: Any]?) -> ResetCredits? {
+        let summary = data["rate_limit_reset_credits"] as? [String: Any]
+        let validDetail = detail.flatMap { d -> [String: Any]? in
+            guard d["available_count"] is Int, d["credits"] is [[String: Any]] else { return nil }
+            return d
+        }
+        guard let count = (validDetail?["available_count"] as? Int) ?? (summary?["available_count"] as? Int),
+              count >= 0 else { return nil }
+        let credits = (validDetail?["credits"] as? [[String: Any]])?.filter {
+            $0["status"] as? String == "available"
+        }.map {
+            ResetCredit(expiresAt: dateFromISO($0["expires_at"]) ?? dateFromEpoch($0["expires_at"]),
+                        applicable: $0["is_supported_by_plan"] as? Bool ?? false)
+        }.sorted { ($0.expiresAt ?? .distantFuture) < ($1.expiresAt ?? .distantFuture) }
+        return ResetCredits(availableCount: count,
+                            applicableCount: credits.map { $0.filter(\.applicable).count }
+                                ?? (summary?["applicable_available_count"] as? Int), credits: credits)
     }
 
     private func pickDict(_ d: [String: Any], _ keys: String...) -> [String: Any]? {
@@ -314,6 +348,8 @@ func makeFetcher(for config: ServiceConfig) -> UsageFetcher? {
         return CodexFetcher()
     case .newAPI:
         return NewAPIFetcher(config: config)
+    case .deepseek, .yicloud:
+        return ProviderAPIFetcher(serviceID: config.id, kind: config.fetcher)
     case .unsupported:
         return nil
     }

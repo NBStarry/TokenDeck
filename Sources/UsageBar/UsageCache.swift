@@ -22,12 +22,20 @@ enum UsageCache {
 
     static func write(_ usage: Usage, service: String) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        var obj: [String: Any] = ["ts": iso.string(from: Date())]
+        var obj: [String: Any] = ["ts": iso.string(from: Date()), "windowSchema": 1]
         obj["plan"] = usage.plan ?? NSNull()
         obj["windows"] = usage.windows.map { w -> [String: Any] in
             ["label": w.label,
              "pct": w.pct,
              "resetAt": w.resetAt.map { iso.string(from: $0) } ?? NSNull()]
+        }
+        if let credits = usage.resetCredits, let encoded = try? JSONEncoder().encode(credits),
+           let value = try? JSONSerialization.jsonObject(with: encoded) {
+            obj["resetCredits"] = value
+        }
+        if let info = usage.apiInfo, let encoded = try? JSONEncoder().encode(info),
+           let value = try? JSONSerialization.jsonObject(with: encoded) {
+            obj["apiInfo"] = value
         }
         if let b = usage.balance {
             obj["balance"] = [
@@ -47,9 +55,18 @@ enum UsageCache {
         guard let data = try? Data(contentsOf: path(service)),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
+        // 旧 Codex 缓存曾把周 primary 标为 5 小时，不能用于显示或告警。
+        if (service == "codex" || service.hasPrefix("codex-")), obj["windowSchema"] as? Int != 1 {
+            return nil
+        }
         let ts = (obj["ts"] as? String).flatMap { iso.date(from: $0) }
         let plan = obj["plan"] as? String
 
+        if let value = obj["apiInfo"],
+           let encoded = try? JSONSerialization.data(withJSONObject: value),
+           let info = try? JSONDecoder().decode(APIInfo.self, from: encoded) {
+            return Cached(usage: Usage(apiInfo: info), ts: ts)
+        }
         // 余额型
         if let b = obj["balance"] as? [String: Any], let bal = num(b["balance"]) {
             let models = (b["models"] as? [[String: Any]] ?? []).compactMap { m -> ModelEntry? in
@@ -70,7 +87,9 @@ enum UsageCache {
             return UsageWindow(label: label, pct: pct, resetAt: resetAt)
         }
         guard !windows.isEmpty else { return nil }
-        return Cached(usage: Usage(plan: plan, windows: windows), ts: ts)
+        let credits = obj["resetCredits"].flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+            .flatMap { try? JSONDecoder().decode(ResetCredits.self, from: $0) }
+        return Cached(usage: Usage(plan: plan, windows: windows, resetCredits: credits), ts: ts)
     }
 
     private static func num(_ value: Any?) -> Double? {

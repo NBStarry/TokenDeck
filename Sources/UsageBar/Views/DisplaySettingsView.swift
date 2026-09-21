@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DisplaySettingsView: View {
     @EnvironmentObject var store: UsageStore
+    var showsRelayPanel = true
 
     // 手机中转面板：显示地址 + 二维码，供手机扫码配置。
     private var relayPanel: some View {
@@ -42,7 +43,9 @@ struct DisplaySettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            relayPanel
+            CodexAccountSettingsView()
+
+            if showsRelayPanel { relayPanel }
 
             AlertSettingsView()
 
@@ -50,16 +53,13 @@ struct DisplaySettingsView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.white.opacity(0.92))
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(Array(store.config.services.enumerated()), id: \.element.id) { index, cfg in
-                        ServiceDisplaySettingsRow(config: cfg, index: index,
-                                                  count: store.config.services.count)
-                    }
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(store.config.services.enumerated()), id: \.element.id) { index, cfg in
+                    ServiceDisplaySettingsRow(config: cfg, index: index,
+                                              count: store.config.services.count)
                 }
-                .padding(.trailing, 2)
             }
-            .frame(maxHeight: 420)
+            .padding(.trailing, 2)
 
             if let error = store.configSaveError {
                 Text(error)

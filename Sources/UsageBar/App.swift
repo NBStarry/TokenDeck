@@ -9,6 +9,25 @@ struct TokenDeckApp {
         // 隐藏 CLI 模式:--fetch <claude|codex>,跑一次取数并打印 JSON 后退出。
         // 用于无头验证取数层,与 GUI 共用同一套 Fetcher。
         let args = CommandLine.arguments
+        if args.contains("--import-api-keys") {
+            do {
+                let data = FileHandle.standardInput.readDataToEndOfFile()
+                let keys = try JSONDecoder().decode([String: String].self, from: data)
+                // 不通过 load 的默认回退覆盖用户已有但无法解析的配置。
+                var config = try JSONDecoder().decode(AppConfig.self, from: Data(contentsOf: AppConfigStore.configURL))
+                try ProviderAPIImport.apply(keys, config: &config, saveKey: CredentialStore.saveAPIKey)
+                try AppConfigStore.save(config)
+                print("API 凭证已保存，渠道配置已更新")
+            } catch {
+                print("API 导入失败；请检查输入、钥匙串及配置权限后重试")
+                exit(1)
+            }
+            return
+        }
+        if args.contains("--preview-accounts") {
+            AccountPreview.run()
+            return
+        }
         if args.count >= 3, args[1] == "--fetch" {
             runFetchCLI(service: args[2])
             return
@@ -216,7 +235,11 @@ struct TokenDeckApp {
             let outcome = await fetcher.fetch()
             switch outcome {
             case .success(let u):
-                if let b = u.balance {
+                if let info = u.apiInfo, let encoded = try? JSONEncoder().encode(info),
+                   let value = try? JSONSerialization.jsonObject(with: encoded),
+                   let data = try? JSONSerialization.data(withJSONObject: ["ok": true, "service": service, "apiInfo": value]) {
+                    print(String(decoding: data, as: UTF8.self))
+                } else if let b = u.balance {
                     let vendors = b.groupedModels.map { "\($0.vendor):\($0.models.count)" }.joined(separator: ", ")
                     print("{\"ok\":true,\"service\":\"\(service)\",\"balance\":\(b.balance),\"used\":\(b.used),\"requestCount\":\(b.requestCount ?? 0),\"modelCount\":\(b.models.count),\"vendors\":\"\(vendors)\"}")
                 } else {

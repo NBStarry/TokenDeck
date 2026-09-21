@@ -3,29 +3,42 @@ import SwiftUI
 struct PopoverRootView: View {
     @EnvironmentObject var store: UsageStore
     @State private var showingSettings = false
+    var availableHeight: CGFloat = 680
+    var showsRelayPanel = true
+
+    init(availableHeight: CGFloat = 680, showsRelayPanel: Bool = true, initiallyShowingSettings: Bool = false) {
+        self.availableHeight = availableHeight
+        self.showsRelayPanel = showsRelayPanel
+        _showingSettings = State(initialValue: initiallyShowingSettings)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-            if showingSettings {
-                DisplaySettingsView()
-            } else {
-                if store.states.isEmpty {
-                    Text("未选择任何渠道商")
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.subGray)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if showingSettings {
+                        DisplaySettingsView(showsRelayPanel: showsRelayPanel)
+                    } else {
+                        if store.states.isEmpty {
+                            Text("未选择任何渠道商")
+                                .font(.system(size: 12))
+                                .foregroundColor(Theme.subGray)
+                        }
+                        ForEach(store.states) { rt in
+                            ServiceCardView(runtime: rt)
+                        }
+                    }
                 }
-                ForEach(store.states) { rt in
-                    ServiceCardView(runtime: rt)
-                }
-                footer
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 2)
             }
+            if !showingSettings { footer }
         }
         .padding(16)
-        .frame(width: showingSettings ? 360 : 320)
+        .frame(width: 360, height: min(680, availableHeight))
         .background(VisualEffectBackground())
+        .preferredColorScheme(.dark)
     }
 
     private var header: some View {
@@ -38,7 +51,7 @@ struct PopoverRootView: View {
                 .foregroundColor(.white)
             Spacer()
             Button {
-                withAnimation(.easeInOut(duration: 0.16)) { showingSettings.toggle() }
+                showingSettings.toggle()
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: showingSettings ? "checkmark" : "gearshape")
@@ -48,10 +61,11 @@ struct PopoverRootView: View {
                 }
                 .foregroundColor(.white.opacity(0.88))
                 .padding(.horizontal, 7)
-                .padding(.vertical, 3)
+                .padding(.vertical, 7)
                 .background(Capsule().fill(Color.white.opacity(0.08)))
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("settings-toggle")
             .help(showingSettings ? "完成" : "显示设置")
         }
     }

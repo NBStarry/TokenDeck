@@ -92,16 +92,32 @@ struct BalanceInfo {
     }
 }
 
+struct ResetCredit: Codable {
+    let expiresAt: Date?
+    let applicable: Bool
+}
+
+struct ResetCredits: Codable {
+    let availableCount: Int
+    let applicableCount: Int?
+    // nil 表示明细获取失败，不等于没有重置机会。
+    let credits: [ResetCredit]?
+}
+
 // 一个服务的归一化用量。windows 用于用量窗口型(Claude/Codex),balance 用于余额型(PhanRouter)。
 struct Usage {
     let plan: String?
     let windows: [UsageWindow]
     let balance: BalanceInfo?
+    let resetCredits: ResetCredits?
+    let apiInfo: APIInfo?
 
-    init(plan: String? = nil, windows: [UsageWindow] = [], balance: BalanceInfo? = nil) {
+    init(plan: String? = nil, windows: [UsageWindow] = [], balance: BalanceInfo? = nil, resetCredits: ResetCredits? = nil, apiInfo: APIInfo? = nil) {
         self.plan = plan
         self.windows = windows
         self.balance = balance
+        self.resetCredits = resetCredits
+        self.apiInfo = apiInfo
     }
 }
 
@@ -139,6 +155,8 @@ enum FetcherKind: String, Codable {
     case claudeOAuth
     case codexWham
     case newAPI
+    case deepseek
+    case yicloud
     case unsupported
 }
 
@@ -305,7 +323,11 @@ enum DisplayContent: String, CaseIterable, Identifiable {
     }
 
     static func options(for config: ServiceConfig) -> [DisplayContent] {
-        options(for: config.category)
+        switch config.fetcher {
+        case .deepseek: return [.balance, .updatedAt]
+        case .yicloud: return [.models, .updatedAt]
+        default: return options(for: config.category)
+        }
     }
 }
 
@@ -458,8 +480,9 @@ struct AppConfig: Codable {
     var refreshSeconds: Int
     var alerts: UsageAlertConfig
     var services: [ServiceConfig]
+    var codexAccounts: [CodexAccount] = []
 
-    enum CodingKeys: String, CodingKey { case refreshSeconds, alerts, services }
+    enum CodingKeys: String, CodingKey { case refreshSeconds, alerts, services, codexAccounts }
 
     init(refreshSeconds: Int, alerts: UsageAlertConfig = .default, services: [ServiceConfig]) {
         self.refreshSeconds = refreshSeconds
@@ -469,6 +492,7 @@ struct AppConfig: Codable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        codexAccounts = try c.decodeIfPresent([CodexAccount].self, forKey: .codexAccounts) ?? []
         refreshSeconds = try c.decodeIfPresent(Int.self, forKey: .refreshSeconds) ?? 300
         alerts = try c.decodeIfPresent(UsageAlertConfig.self, forKey: .alerts) ?? .default
         services = try c.decodeIfPresent([ServiceConfig].self, forKey: .services)
@@ -494,5 +518,6 @@ struct AppConfig: Codable {
 struct ServiceRuntime: Identifiable {
     let config: ServiceConfig
     var status: ServiceStatus
+    var isCurrentAccount = false
     var id: String { config.id }
 }
