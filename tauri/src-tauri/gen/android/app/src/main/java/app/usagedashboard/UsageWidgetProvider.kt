@@ -212,7 +212,7 @@ class UsageWidgetProvider : AppWidgetProvider() {
                 return
             }
 
-            views.setTextViewText(R.id.w_title, displayTitle(svc.optString("id"), svc.optString("title", "用量")))
+            views.setTextViewText(R.id.w_title, (if (svc.optBoolean("isCurrentAccount")) "当前 · " else "") + displayTitle(svc.optString("id"), svc.optString("title", "用量")))
             views.setTextColor(R.id.w_dot, try { Color.parseColor(svc.optString("accent", "#8E8E93")) } catch (e: Exception) { Color.GRAY })
             views.setTextViewText(R.id.w_updated, updatedText(context))
 
@@ -221,12 +221,56 @@ class UsageWidgetProvider : AppWidgetProvider() {
                 "error" -> showStatus(views, svc.optString("message", "出错了"), "#F85149")
                 "ok" -> {
                     val balance = svc.optJSONObject("balance")
-                    if (balance != null) renderBalance(views, balance)
+                    val summary = apiSummary(svc.optJSONObject("apiInfo"))
+                    if (summary != null) {
+                        views.setViewVisibility(R.id.w_windows, View.GONE)
+                        views.setViewVisibility(R.id.w_status, View.GONE)
+                        views.setViewVisibility(R.id.w_balance, View.VISIBLE)
+                        views.setTextViewText(R.id.w_bal_value, summary.first)
+                        views.setTextViewText(R.id.w_bal_sub, summary.second)
+                    } else if (balance != null) renderBalance(views, balance)
                     else renderWindows(views, svc.optJSONArray("windows"))
+                    val note = serviceNote(svc)
+                    if (note.isNotEmpty()) {
+                        views.setViewVisibility(R.id.w_status, View.VISIBLE)
+                        views.setTextViewText(R.id.w_status, note)
+                        views.setTextColor(R.id.w_status, Color.parseColor("#8E8E93"))
+                    }
                 }
                 else -> showStatus(views, "无数据", "#8E8E93")
             }
             mgr.updateAppWidget(id, views)
+        }
+
+        fun apiSummary(info: JSONObject?): Pair<String, String>? {
+            if (info == null) return null
+            val balances = info.optJSONArray("balances")
+            if (balances != null && balances.length() > 0) {
+                val b = balances.getJSONObject(0)
+                val title = "%s %.2f".format(b.optString("currency"), b.getDouble("total"))
+                val sub = if (balances.length() > 1) "共 ${balances.length()} 种币种 · App 查看详情"
+                    else "充值 %.2f · 赠金 %.2f".format(b.getDouble("toppedUp"), b.getDouble("granted"))
+                return Pair(title, sub)
+            }
+            val models = info.optJSONArray("models") ?: return Pair("数据暂不可用", "打开 App 查看")
+            return Pair("密钥查询正常", "${models.length()} 个授权模型 · 暂无额度查询")
+        }
+
+        fun serviceNote(svc: JSONObject): String {
+            val parts = mutableListOf<String>()
+            if (svc.optBoolean("stale")) parts.add("上次数据")
+            val reset = svc.optJSONObject("resetCredits")
+            if (reset != null) {
+                parts.add("重置 ${reset.optInt("availableCount")} 次")
+                val credits = reset.optJSONArray("credits")
+                val dates = (0 until (credits?.length() ?: 0)).mapNotNull {
+                    isoMs(optionalString(credits!!.getJSONObject(it), "expiresAt"))
+                }
+                dates.minOrNull()?.let {
+                    parts.add(SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()).format(Date(it)) + " 到期")
+                }
+            }
+            return parts.joinToString(" · ")
         }
 
         fun findService(context: Context, serviceId: String?): JSONObject? {
@@ -342,6 +386,7 @@ class UsageWidgetProvider : AppWidgetProvider() {
                 if (cfg.optString("id") != serviceId) continue
                 val statusObj = item.optJSONObject("status") ?: return null
                 return relaySnapshotService(context, serviceId, cfg, statusObj)
+                    .put("isCurrentAccount", item.optBoolean("isCurrentAccount", false))
             }
             return null
         }
@@ -360,7 +405,10 @@ class UsageWidgetProvider : AppWidgetProvider() {
                 "ok", "stale" -> {
                     val usage = status.optJSONObject("usage")
                         ?: throw IllegalStateException("中转数据格式异常")
-                    base.put("kind", "ok")
+                    for (field in listOf("apiInfo", "resetCredits", "balance", "windows")) base.remove(field)
+                    base.put("kind", "ok").put("stale", status.optString("kind") == "stale")
+                    usage.optJSONObject("apiInfo")?.let { base.put("apiInfo", it) }
+                    usage.optJSONObject("resetCredits")?.let { base.put("resetCredits", it) }
                     optionalString(usage, "plan")?.let { base.put("plan", it) }
                     val balance = usage.optJSONObject("balance")
                     if (balance != null) {
@@ -707,7 +755,7 @@ class UsageDoubleWidgetProvider : AppWidgetProvider() {
                 showBlockStatus(views, ids, UsageWidgetProvider.displayTitle(serviceId, "用量"), "#8E8E93", "打开 App 加载数据")
                 return
             }
-            val title = UsageWidgetProvider.displayTitle(svc.optString("id"), svc.optString("title", "用量"))
+            val title = (if (svc.optBoolean("isCurrentAccount")) "当前 · " else "") + UsageWidgetProvider.displayTitle(svc.optString("id"), svc.optString("title", "用量"))
             val accent = svc.optString("accent", "#8E8E93")
             views.setTextViewText(ids.title, title)
             views.setTextColor(ids.dot, try { Color.parseColor(accent) } catch (e: Exception) { Color.GRAY })
@@ -718,8 +766,21 @@ class UsageDoubleWidgetProvider : AppWidgetProvider() {
                 "error" -> showBlockStatus(views, ids, title, accent, svc.optString("message", "出错了"))
                 "ok" -> {
                     val balance = svc.optJSONObject("balance")
-                    if (balance != null) renderBlockBalance(views, ids, balance)
+                    val summary = UsageWidgetProvider.apiSummary(svc.optJSONObject("apiInfo"))
+                    if (summary != null) {
+                        views.setViewVisibility(ids.windows, View.GONE)
+                        views.setViewVisibility(ids.status, View.GONE)
+                        views.setViewVisibility(ids.balance, View.VISIBLE)
+                        views.setTextViewText(ids.balanceValue, summary.first)
+                        views.setTextViewText(ids.balanceSub, summary.second)
+                    } else if (balance != null) renderBlockBalance(views, ids, balance)
                     else renderBlockWindows(views, ids, svc.optJSONArray("windows"))
+                    val note = UsageWidgetProvider.serviceNote(svc)
+                    if (note.isNotEmpty()) {
+                        views.setViewVisibility(ids.status, View.VISIBLE)
+                        views.setTextViewText(ids.status, note)
+                        views.setTextColor(ids.status, Color.parseColor("#8E8E93"))
+                    }
                 }
                 else -> showBlockStatus(views, ids, title, accent, "无数据")
             }

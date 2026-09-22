@@ -51,6 +51,8 @@ pub enum ServiceStatus {
 pub struct ServiceSnapshot {
     pub config: ServiceConfig,
     pub status: ServiceStatus,
+    #[serde(default)]
+    pub is_current_account: bool,
 }
 
 // relay 模式下从 Mac 拉取的中转快照(契约 JSON 顶层结构)。
@@ -113,6 +115,19 @@ impl AppState {
         *self.relay_snapshots.lock().unwrap() = Some(services);
     }
 
+    pub fn mark_relay_stale(&self) {
+        if let Some(services) = self.relay_snapshots.lock().unwrap().as_mut() {
+            for service in services {
+                if let ServiceStatus::Ok { usage, fetched_at } = &service.status {
+                    service.status = ServiceStatus::Stale {
+                        usage: usage.clone(), cached_at: Some(*fetched_at),
+                        error: "中转刷新失败，显示上次数据".into(),
+                    };
+                }
+            }
+        }
+    }
+
     #[cfg(mobile)]
     fn set_enabled_errors(&self, message: &str) {
         let config = self.config.lock().unwrap();
@@ -155,6 +170,7 @@ impl AppState {
                     },
                 };
                 ServiceSnapshot {
+                    is_current_account: false,
                     config: cfg.clone(),
                     status,
                 }
@@ -278,16 +294,17 @@ impl AppState {
                     let _ = app.emit("usage-updated", ());
                 }
                 Err(_e) => {
+                    self.mark_relay_stale();
                     #[cfg(mobile)]
                     {
                         if self.relay_snapshots.lock().unwrap().is_none() {
                             self.set_enabled_errors(&_e);
-                            let snaps = self.snapshots();
-                            let lu = *self.last_updated.lock().unwrap();
-                            crate::widget::write_snapshot(&snaps, lu);
                         }
+                        let snaps = self.snapshots();
+                        let lu = *self.last_updated.lock().unwrap();
+                        crate::widget::write_snapshot(&snaps, lu);
                     }
-                    // 有上次中转快照时保留旧数据;仅更新时间不动。
+                    // 保留快照及其原始时间，但明确标记为旧数据。
                     let _ = app.emit("usage-updated", ());
                 }
             }
@@ -462,6 +479,8 @@ mod tests {
         let st = AppState::new(crate::models::AppConfig::default());
         // 预置缓存
         let u = crate::models::Usage {
+            api_info: None,
+            reset_credits: None,
             plan: Some("Pro".into()),
             windows: vec![crate::models::UsageWindow {
                 label: "周".into(),

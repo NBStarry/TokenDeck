@@ -78,6 +78,7 @@ fn service_json(s: &ServiceSnapshot) -> Value {
         "id": s.config.id,
         "title": title,
         "accent": s.config.accent,
+        "isCurrentAccount": s.is_current_account,
     });
     match &s.status {
         ServiceStatus::Loading => {
@@ -89,6 +90,9 @@ fn service_json(s: &ServiceSnapshot) -> Value {
         }
         ServiceStatus::Ok { usage, .. } | ServiceStatus::Stale { usage, .. } => {
             v["kind"] = json!("ok");
+            v["stale"] = json!(matches!(&s.status, ServiceStatus::Stale { .. }));
+            v["apiInfo"] = json!(usage.api_info);
+            v["resetCredits"] = json!(usage.reset_credits);
             if let Some(p) = &usage.plan {
                 v["plan"] = json!(p);
             }
@@ -127,5 +131,28 @@ pub fn write_snapshot(snapshots: &[ServiceSnapshot], last_updated: Option<DateTi
             #[cfg(target_os = "android")]
             notify_android_widgets();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn mac_payload_preserves_providers_credits_and_current_identity() {
+        let payload: crate::state::RelayPayload = serde_json::from_str(include_str!("../tests/fixtures/mac-relay.json")).unwrap();
+        let services: Vec<Value> = payload.services.iter().map(service_json).collect();
+        assert_eq!(services[0]["isCurrentAccount"], true);
+        assert_eq!(services[0]["windows"][0]["label"], "周");
+        assert_eq!(services[0]["resetCredits"]["availableCount"], 2);
+        assert_eq!(services[1]["stale"], true);
+        assert_eq!(services[2]["apiInfo"]["balances"][0]["total"], 0.0);
+        assert_eq!(services[3]["apiInfo"]["models"].as_array().unwrap().len(), 2);
+        let state = crate::state::AppState::new(crate::models::AppConfig::default());
+        state.apply_relay(payload.services);
+        state.mark_relay_stale();
+        let retained = state.relay_snapshots.lock().unwrap();
+        let stale = service_json(&retained.as_ref().unwrap()[2]);
+        assert_eq!(stale["stale"], true);
+        assert_eq!(stale["apiInfo"]["balances"][1]["currency"], "USD");
     }
 }

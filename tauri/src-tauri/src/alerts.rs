@@ -177,6 +177,8 @@ mod tests {
         let now = Utc::now();
         let svc = sub_service();
         let usage = Usage {
+            api_info: None,
+            reset_credits: None,
             plan: None,
             balance: None,
             windows: vec![UsageWindow {
@@ -198,6 +200,8 @@ mod tests {
         let now = Utc::now();
         let svc = sub_service();
         let usage = Usage {
+            api_info: None,
+            reset_credits: None,
             plan: None,
             balance: None,
             windows: vec![UsageWindow {
@@ -222,6 +226,8 @@ mod tests {
         a.minimum_usage_percent = 60.0;
         a.pace_multiplier = 1.0;
         let over = Usage {
+            api_info: None,
+            reset_credits: None,
             plan: None,
             balance: None,
             windows: vec![UsageWindow {
@@ -232,6 +238,8 @@ mod tests {
         };
         assert_eq!(evaluate(&svc, &over, &a, now).fires.len(), 1);
         let under = Usage {
+            api_info: None,
+            reset_credits: None,
             plan: None,
             balance: None,
             windows: vec![UsageWindow {
@@ -251,6 +259,8 @@ mod tests {
         )
         .unwrap();
         let usage = Usage {
+            api_info: None,
+            reset_credits: None,
             plan: None,
             balance: None,
             windows: vec![UsageWindow {

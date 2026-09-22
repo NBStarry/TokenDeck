@@ -3,6 +3,8 @@
   import { barColor, hm, resetCountdown } from '$lib/theme';
   import ProgressBar from '$lib/components/ProgressBar.svelte';
   import BalanceBody from '$lib/components/BalanceBody.svelte';
+  import ProviderBody from '$lib/components/ProviderBody.svelte';
+  import ResetCreditsBody from '$lib/components/ResetCreditsBody.svelte';
 
   interface Props {
     snapshot: ServiceSnapshot;
@@ -44,6 +46,8 @@
     {/if}
   </div>
 
+  {#if snapshot.isCurrentAccount}<span class="current-account">当前使用</span>{/if}
+
   <!-- Content by status.kind -->
   {#if status.kind === 'loading'}
     <div class="loading-row">
@@ -52,7 +56,9 @@
     </div>
 
   {:else if status.kind === 'ok'}
-    {#if status.usage.balance}
+    {#if status.usage.apiInfo}
+      <ProviderBody info={status.usage.apiInfo} {accent} {display} />
+    {:else if status.usage.balance}
       <BalanceBody info={status.usage.balance} {accent} {display} />
     {:else}
       {@const visible = visibleWindows(status.usage)}
@@ -79,6 +85,7 @@
         </div>
       {/if}
     {/if}
+    {#if status.usage.resetCredits}<ResetCreditsBody info={status.usage.resetCredits} />{/if}
     {#if display.updatedAt}
       <div class="footer-ok">
         <span class="foot-gray" style="font-size: 10px;">更新于 {hm(status.fetchedAt)}</span>
@@ -86,7 +93,9 @@
     {/if}
 
   {:else if status.kind === 'stale'}
-    {#if status.usage.balance}
+    {#if status.usage.apiInfo}
+      <ProviderBody info={status.usage.apiInfo} {accent} {display} />
+    {:else if status.usage.balance}
       <BalanceBody info={status.usage.balance} {accent} {display} />
     {:else}
       {@const visible = visibleWindows(status.usage)}
@@ -113,6 +122,7 @@
         </div>
       {/if}
     {/if}
+    {#if status.usage.resetCredits}<ResetCreditsBody info={status.usage.resetCredits} />{/if}
     <div class="footer-stale">
       <span style="font-size: 10px; color: #D29922; text-align: right;">
         ⚠ 刷新失败,显示上次结果{status.cachedAt ? ' · ' + hm(status.cachedAt) : ''}
@@ -125,6 +135,8 @@
 </div>
 
 <style>
+.current-account { color: #10A37F; font-size: 11px; margin-bottom: 8px; }
+.title { overflow-wrap: anywhere; }
 .card {
   display: flex;
   flex-direction: column;

@@ -105,6 +105,8 @@ pub fn parse_claude(v: &Value, status: u16) -> Result<Usage, String> {
     }
     let plan = data.get("plan_type").and_then(capitalized_plan);
     Ok(Usage {
+        api_info: None,
+        reset_credits: None,
         plan,
         windows,
         balance: None,
@@ -220,6 +222,8 @@ pub fn parse_codex(v: &Value, status: u16) -> Result<Usage, String> {
     }
     let plan = data.get("plan_type").and_then(capitalized_plan);
     Ok(Usage {
+        api_info: None,
+        reset_credits: None,
         plan,
         windows,
         balance: None,
@@ -415,6 +419,7 @@ pub async fn fetch_service(cfg: &ServiceConfig) -> Result<Usage, String> {
         FetcherKind::ClaudeOauth => fetch_claude().await,
         FetcherKind::CodexWham => fetch_codex().await,
         FetcherKind::NewApi => fetch_newapi(cfg).await,
+        FetcherKind::Deepseek | FetcherKind::Yicloud => Err("请通过 Mac 中转查看此渠道".into()),
         FetcherKind::Unsupported => Err(format!("{} 暂不支持自动取数", cfg.title)),
     }
 }
@@ -516,6 +521,8 @@ async fn fetch_newapi(cfg: &ServiceConfig) -> Result<Usage, String> {
     };
 
     Ok(Usage {
+        api_info: None,
+        reset_credits: None,
         plan: None,
         windows: Vec::new(),
         balance: Some(BalanceInfo {

@@ -55,6 +55,9 @@ pub fn write(usage: &Usage, service: &str) {
         "windows": windows,
     });
 
+    obj["apiInfo"] = serde_json::json!(usage.api_info);
+    obj["resetCredits"] = serde_json::json!(usage.reset_credits);
+
     if let Some(b) = &usage.balance {
         let models: Vec<Value> = b
             .models
@@ -96,6 +99,11 @@ pub fn read(service: &str) -> Option<Cached> {
 
     let plan = obj["plan"].as_str().map(|s| s.to_string());
 
+    if let Some(value) = obj.get("apiInfo").filter(|v| v.is_object()) {
+        let info = serde_json::from_value(value.clone()).ok()?;
+        return Some(Cached { usage: Usage { plan, windows: vec![], balance: None,
+            api_info: Some(info), reset_credits: None }, ts });
+    }
     // 余额型
     if let Some(b) = obj.get("balance").filter(|v| v.is_object()) {
         if let Some(bal) = num(&b["balance"]) {
@@ -123,6 +131,8 @@ pub fn read(service: &str) -> Option<Cached> {
 
             return Some(Cached {
                 usage: Usage {
+                    api_info: None,
+                    reset_credits: None,
                     plan: None,
                     windows: vec![],
                     balance: Some(BalanceInfo {
@@ -159,6 +169,8 @@ pub fn read(service: &str) -> Option<Cached> {
 
     Some(Cached {
         usage: Usage {
+            api_info: None,
+            reset_credits: obj.get("resetCredits").and_then(|v| serde_json::from_value(v.clone()).ok()),
             plan,
             windows,
             balance: None,
@@ -179,6 +191,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("USAGE_DASHBOARD_HOME", dir.path());
         let u = Usage {
+            api_info: None,
+            reset_credits: None,
             plan: Some("Pro".into()),
             windows: vec![UsageWindow {
                 label: "5 小时".into(),
@@ -200,6 +214,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("USAGE_DASHBOARD_HOME", dir.path());
         let u = Usage {
+            api_info: None,
+            reset_credits: None,
             plan: None,
             windows: vec![],
             balance: Some(BalanceInfo {
@@ -229,4 +245,24 @@ mod tests {
         assert!(read("nope").is_none());
         std::env::remove_var("USAGE_DASHBOARD_HOME");
     }
+    #[test]
+    #[serial]
+    fn relay_usage_extensions_roundtrip_without_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("USAGE_DASHBOARD_HOME", dir.path());
+        let payload: crate::state::RelayPayload = serde_json::from_str(include_str!("../tests/fixtures/mac-relay.json")).unwrap();
+        for service in payload.services {
+            let usage = match service.status {
+                crate::state::ServiceStatus::Ok { usage, .. } |
+                crate::state::ServiceStatus::Stale { usage, .. } => usage,
+                _ => panic!("missing test usage"),
+            };
+            write(&usage, &service.config.id);
+            let got = read(&service.config.id).unwrap();
+            assert_eq!(serde_json::to_value(&usage.api_info).unwrap(), serde_json::to_value(&got.usage.api_info).unwrap());
+            assert_eq!(serde_json::to_value(&usage.reset_credits).unwrap(), serde_json::to_value(&got.usage.reset_credits).unwrap());
+        }
+        std::env::remove_var("USAGE_DASHBOARD_HOME");
+    }
+
 }

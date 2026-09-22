@@ -1,0 +1,6 @@
+{"ts":"2030-01-01T00:00:00Z","services":[
+ {"config":{"id":"codex-synthetic-a","title":"Codex · 示例甲","category":"subscription","fetcher":"codexWham"},"isCurrentAccount":true,"status":{"kind":"ok","fetchedAt":"2030-01-01T00:00:00Z","usage":{"plan":"Plus","windows":[{"label":"周","pct":42,"resetAt":"2030-01-05T00:00:00Z"}],"resetCredits":{"availableCount":2,"applicableCount":2,"credits":[{"expiresAt":"2030-01-04T00:00:00Z","applicable":true},{"expiresAt":null,"applicable":true}]}}}},
+ {"config":{"id":"codex-synthetic-b","title":"Codex · 示例乙","category":"subscription","fetcher":"codexWham"},"status":{"kind":"stale","cachedAt":"2030-01-01T00:00:00Z","error":"示例错误","usage":{"windows":[{"label":"周","pct":12,"resetAt":null}],"resetCredits":{"availableCount":0}}}},
+ {"config":{"id":"deepseek","title":"DeepSeek","category":"apiUsage","fetcher":"deepseek"},"status":{"kind":"ok","fetchedAt":"2030-01-01T00:00:00Z","usage":{"windows":[],"apiInfo":{"balances":[{"currency":"CNY","total":0,"toppedUp":0,"granted":0},{"currency":"USD","total":12.34,"toppedUp":10,"granted":2.34}],"isAvailable":true}}}},
+ {"config":{"id":"yicloud","title":"易云 TokenFactory","category":"apiUsage","fetcher":"yicloud"},"status":{"kind":"ok","fetchedAt":"2030-01-01T00:00:00Z","usage":{"windows":[],"apiInfo":{"models":["Kimi-K3","示例模型"]}}}}
+]}

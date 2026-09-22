@@ -20,7 +20,10 @@
     label: string;
   }
 
-  function displayOptions(category: BillingCategory): DisplayOption[] {
+  function displayOptions(cfg: ServiceConfig): DisplayOption[] {
+    if (cfg.fetcher === 'deepseek') return [{ key: 'balance', label: '当前余额' }, { key: 'updatedAt', label: '更新时间' }];
+    if (cfg.fetcher === 'yicloud') return [{ key: 'models', label: '模型列表' }, { key: 'updatedAt', label: '更新时间' }];
+    const category = cfg.category;
     if (category === 'subscription') {
       return [
         { key: 'plan',           label: '套餐' },
@@ -258,7 +261,7 @@
         {@const isEnabled = cfg.enabled}
         {@const isFirst = index === 0}
         {@const isLast = index === $config.services.length - 1}
-        {@const options = displayOptions(cfg.category)}
+        {@const options = displayOptions(cfg)}
 
         <div class="panel service-row">
           <!-- Service header: checkbox + title + category badge + move buttons -->

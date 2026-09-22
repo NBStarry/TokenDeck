@@ -419,6 +419,8 @@ final class AccountTests: XCTestCase {
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let services = try XCTUnwrap(json["services"] as? [[String: Any]])
         XCTAssertEqual(services.count, 3)
+        XCTAssertEqual(services.first?["isCurrentAccount"] as? Bool, true)
+        XCTAssertEqual(services.filter { $0["isCurrentAccount"] as? Bool == true }.count, 1)
         let text = String(decoding: data, as: UTF8.self)
         XCTAssertFalse(text.contains("accessToken"))
         XCTAssertFalse(text.contains("workspace"))

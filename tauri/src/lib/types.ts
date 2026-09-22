@@ -5,7 +5,7 @@
 export type BillingCategory = 'subscription' | 'apiUsage';
 
 // models.rs: FetcherKind — note NewApi serializes as "newAPI" (serde rename)
-export type FetcherKind = 'claudeOauth' | 'codexWham' | 'newAPI' | 'unsupported';
+export type FetcherKind = 'claudeOauth' | 'codexWham' | 'newAPI' | 'deepseek' | 'yicloud' | 'unsupported';
 
 // models.rs: UsageAlertRule
 export type UsageAlertRule =
@@ -34,11 +34,24 @@ export interface BalanceInfo {
   models: ModelEntry[];
 }
 
+export interface APIInfo {
+  balances?: { currency: string; total: number; toppedUp: number; granted: number }[] | null;
+  isAvailable?: boolean | null;
+  models?: string[] | null;
+}
+export interface ResetCredits {
+  availableCount: number;
+  applicableCount?: number | null;
+  credits?: { expiresAt: string | null; applicable: boolean }[] | null;
+}
+
 // models.rs: Usage
 export interface Usage {
   plan: string | null;
   windows: UsageWindow[];
   balance: BalanceInfo | null;
+  apiInfo?: APIInfo | null;
+  resetCredits?: ResetCredits | null;
 }
 
 // models.rs: ServiceDisplayOptions — all five_hour→fiveHour, reset_countdown→resetCountdown, etc.
@@ -106,6 +119,7 @@ export type ServiceStatus =
 
 // state.rs: ServiceSnapshot
 export interface ServiceSnapshot {
+  isCurrentAccount?: boolean;
   config: ServiceConfig;
   status: ServiceStatus;
 }

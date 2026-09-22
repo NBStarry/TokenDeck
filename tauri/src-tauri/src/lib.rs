@@ -12,7 +12,7 @@ mod state;
 #[cfg(desktop)]
 mod tray;
 // 原生 App Widget 的数据写出,仅移动端。
-#[cfg(mobile)]
+#[cfg(any(mobile, test))]
 mod widget;
 
 use tauri::Manager;

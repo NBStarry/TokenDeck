@@ -19,6 +19,8 @@ pub enum FetcherKind {
     CodexWham,
     #[serde(rename = "newAPI")]
     NewApi,
+    Deepseek,
+    Yicloud,
     Unsupported,
 }
 
@@ -351,6 +353,38 @@ pub struct BalanceInfo {
     pub models: Vec<ModelEntry>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiBalance {
+    pub currency: String,
+    pub total: f64,
+    pub topped_up: f64,
+    pub granted: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiInfo {
+    pub balances: Option<Vec<ApiBalance>>,
+    pub is_available: Option<bool>,
+    pub models: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetCredit {
+    pub expires_at: Option<DateTime<Utc>>,
+    pub applicable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetCredits {
+    pub available_count: u32,
+    pub applicable_count: Option<u32>,
+    pub credits: Option<Vec<ResetCredit>>,
+}
+
 // 一个服务的归一化用量。windows 用于用量窗口型(Claude/Codex),balance 用于余额型(PhanRouter)。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -358,6 +392,8 @@ pub struct Usage {
     pub plan: Option<String>,
     pub windows: Vec<UsageWindow>,
     pub balance: Option<BalanceInfo>,
+    pub api_info: Option<ApiInfo>,
+    pub reset_credits: Option<ResetCredits>,
 }
 
 #[cfg(test)]

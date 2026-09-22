@@ -17,7 +17,7 @@ private struct RelayConfig: Encodable {
     let display: ServiceDisplayOptions
 }
 
-private struct RelayService: Encodable { let config: RelayConfig; let status: RelayStatus }
+private struct RelayService: Encodable { let config: RelayConfig; let status: RelayStatus; let isCurrentAccount: Bool }
 private struct RelayWindow: Encodable { let label: String; let pct: Double; let resetAt: String? }
 private struct RelayModel: Encodable { let name: String; let vendor: String }
 private struct RelayBalance: Encodable {
@@ -118,7 +118,7 @@ private func mapStatus(_ s: ServiceStatus) -> RelayStatus {
 func relayPayloadJSON(states: [ServiceRuntime], lastUpdated: Date?) -> Data {
     let payload = RelayPayload(
         ts: iso(lastUpdated),
-        services: states.map { RelayService(config: mapConfig($0.config), status: mapStatus($0.status)) })
+        services: states.map { RelayService(config: mapConfig($0.config), status: mapStatus($0.status), isCurrentAccount: $0.isCurrentAccount) })
     let enc = JSONEncoder()
     enc.outputFormatting = [.withoutEscapingSlashes]
     return (try? enc.encode(payload)) ?? Data("{\"services\":[]}".utf8)

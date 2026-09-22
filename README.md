@@ -158,7 +158,7 @@ DeepSeek 与易云从 Hermes 经 SSH 一次性导入已有 Key，后续由 Mac �
 管理入口 `TokenDeck --import-api-keys` 从标准输入接收 JSON 对象（键为 `deepseek`、`yicloud`、`openrouter`，值为对应 Key），仅保存到钥匙串并追加未存在的渠道；不要把 Key 放到命令参数或 shell 历史中。
 重新导入会更新 Key，保留现有渠道顺序和显示选项。配置保存失败时，已写入钥匙串的 Key 保留，可重试导入；不回滚覆盖后续凭证更新。
 Hermes 更换 Key 后需要重新导入，不自动远程同步。DeepSeek 不展示未提供的历史消耗，易云查询成功不代表模型推理一定可用。
-这两个渠道不参与订阅额度告警；失败显示缓存时间或明确错误。relay 增加 `apiInfo` 字段，本轮未增加手机端展示。
+这两个渠道不参与订阅额度告警；失败显示缓存时间或明确错误。relay 增加 `apiInfo` 字段；新版 Android 可通过 Mac 中转展示两渠道，手机不接收 API Key。
 
 Mac 卡片右上角可单独刷新，刷新期间保留已有结果并显示进度；同一渠道不重复请求，最多四个单卡并发。整体刷新在单卡请求结束后执行。
 
@@ -250,7 +250,7 @@ macOS 首次启动会生成 `~/.config/usage-bar/config.json`：
 
 多账户仍使用 `services[].config` / `services[].status` 契约，每个 Codex 账号对应独立的
 `codex-<身份摘要>` 服务 ID，当前账号排在最前。不会中转访问令牌或真实账号 ID；旧手机小组件
-若绑定单一 `codex` ID，需要重新选择对应账号。手机端实际显示与小组件重绑尚需设备验收。
+若绑定单一 `codex` ID，需要重新选择对应账号。新版 Android 保留账号顺序与当前标记，展示重置机会和到期明细；旧的小组件绑定需在手机重新选择对应账号。实际显示与小组件重绑需设备验收。
 
 中转依赖 Mac App 持续运行且两台设备位于同一 Tailscale 网络。开机启动时应确保
 `/Applications/TokenDeck.app` 是包含中转功能的当前版本；仅更新仓库中的构建产物
