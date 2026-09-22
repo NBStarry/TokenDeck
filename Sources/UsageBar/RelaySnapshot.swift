@@ -67,6 +67,7 @@ private func fetcherString(_ f: FetcherKind) -> String {
     case .newAPI:      return "newAPI"
     case .deepseek: return "deepseek"
     case .yicloud: return "yicloud"
+    case .openRouter: return "unsupported" // Older mobile decoders must still accept the snapshot.
     case .unsupported: return "unsupported"
     }
 }

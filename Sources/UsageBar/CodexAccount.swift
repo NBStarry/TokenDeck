@@ -16,6 +16,7 @@ struct UsageDependencies {
         try CodexAccountSwitcher().switchAccount(to: target, savePrevious: CredentialStore.saveCodexCredentials)
     }
     var removeCredentials: (String) throws -> Void = CredentialStore.removeCodexCredentials
+    var saveAPIKey: (String, String) throws -> Void = CredentialStore.saveAPIKey
     var saveConfig: (AppConfig) throws -> Void = AppConfigStore.save
     var readCache: (String) -> UsageCache.Cached? = UsageCache.read
     var writeCache: (Usage, String) -> Void = { UsageCache.write($0, service: $1) }

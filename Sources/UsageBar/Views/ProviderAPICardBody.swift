@@ -8,6 +8,31 @@ struct ProviderAPICardBody: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let router = info.openRouter {
+                Text(router.scope == .account ? "账户额度 · USD" : "当前 Key · USD")
+                    .foregroundColor(Theme.labelGray)
+                if display.balance {
+                    if let remaining = router.remaining {
+                        Text(String(format: "%@ $%.2f", router.scope == .account ? "账户余额" : "Key 剩余额度", remaining))
+                            .font(.system(size: 18, weight: .semibold)).foregroundColor(accent)
+                    } else {
+                        Text(router.limit == nil ? "Key 未设限额" : "Key 剩余额度未知")
+                            .foregroundColor(Theme.subGray)
+                    }
+                    if let limit = router.limit { Text(String(format: "Key 限额 $%.2f", limit)).foregroundColor(Theme.subGray) }
+                }
+                if display.used {
+                    Text(String(format: "%@ $%.2f", router.scope == .account ? "账户累计消耗" : "Key 累计消耗", router.used))
+                        .foregroundColor(Theme.subGray)
+                }
+                if router.scope == .key {
+                    if let reset = router.reset {
+                        Text("Key 限额重置周期：" + (["daily": "每日", "weekly": "每周", "monthly": "每月"][reset] ?? reset))
+                            .foregroundColor(Theme.subGray)
+                    }
+                    Text("账户总余额需使用管理 Key 查询").foregroundColor(Theme.subGray)
+                }
+            }
             if let balances = info.balances {
                 if display.balance {
                     ForEach(Array(balances.enumerated()), id: \.offset) { _, balance in

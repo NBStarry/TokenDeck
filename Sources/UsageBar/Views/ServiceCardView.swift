@@ -2,6 +2,9 @@ import SwiftUI
 
 struct ServiceCardView: View {
     let runtime: ServiceRuntime
+    var refreshing = false
+    var refreshEnabled = true
+    var onRefresh: (() -> Void)? = nil
 
     private var accent: Color { Color(hex: runtime.config.accent) }
     private var display: ServiceDisplayOptions { runtime.config.display }
@@ -44,6 +47,18 @@ struct ServiceCardView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 7).padding(.vertical, 2)
                     .background(Capsule().fill(Color.black))
+            }
+            if let onRefresh {
+                Button(action: onRefresh) {
+                    if refreshing { ProgressView().controlSize(.mini) }
+                    else { Image(systemName: "arrow.clockwise").font(.system(size: 12)) }
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(Theme.subGray)
+                .frame(width: 24, height: 24)
+                .disabled(!refreshEnabled || refreshing)
+                .help("刷新此渠道")
+                .accessibilityLabel("刷新 " + runtime.config.title)
             }
         }
         .padding(.bottom, 12)

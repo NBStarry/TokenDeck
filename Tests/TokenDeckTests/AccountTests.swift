@@ -82,6 +82,60 @@ private final class Fixture {
 }
 
 final class AccountTests: XCTestCase {
+    @MainActor func testRotatingAPIKeyDiscardsInflightResultAndRefreshes() async throws {
+        let fixture = Fixture()
+        var config = fixture.config(count: 0)
+        config.services = [ServiceConfig(id: "openrouter", title: "OpenRouter", accent: "#A78BFA", category: .apiUsage, fetcher: .openRouter)]
+        var dependencies = fixture.dependencies()
+        var savedKey = ""
+        dependencies.saveAPIKey = { key, id in
+            XCTAssertEqual(id, "openrouter")
+            savedKey = key
+        }
+        let store = UsageStore(config: config, dependencies: dependencies)
+        await fixture.requests.configure(delay: 80_000_000, values: ["openrouter": 11])
+        let first = Task { await store.refreshService("openrouter") }
+        while !store.refreshingServiceIDs.contains("openrouter") { await Task.yield() }
+        while await fixture.requests.calls == 0 { await Task.yield() }
+        XCTAssertTrue(store.configureOpenRouter(" synthetic "))
+        XCTAssertEqual(savedKey, "synthetic")
+        await fixture.requests.configure(delay: 80_000_000, values: ["openrouter": 22])
+        await first.value
+        XCTAssertNil(fixture.cache["openrouter"])
+        for _ in 0..<100 {
+            if fixture.cache["openrouter"] != nil { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(fixture.cache["openrouter"]?.usage.windows.first?.pct, 22)
+        XCTAssertEqual(store.config.services.count, 1)
+    }
+
+    @MainActor func testSingleRefreshDeduplicatesAndQueuesGlobalRefresh() async throws {
+        let fixture = Fixture()
+        let store = UsageStore(config: fixture.config(count: 2), dependencies: fixture.dependencies())
+        let id = try XCTUnwrap(store.states.first?.id)
+        await fixture.requests.configure(delay: 80_000_000)
+        let first = Task { await store.refreshService(id) }
+        while !store.refreshingServiceIDs.contains(id) { await Task.yield() }
+        await store.refreshService(id)
+        XCTAssertFalse(store.canRefreshService(id))
+        await first.value
+        let calls = await fixture.requests.calls
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(fixture.cache.count, 1)
+        let second = Task { await store.refreshService(id) }
+        while !store.refreshingServiceIDs.contains(id) { await Task.yield() }
+        await store.refresh()
+        await second.value
+        for _ in 0..<100 {
+            if await fixture.requests.calls >= 2 + store.states.count, !store.isRefreshing { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let total = await fixture.requests.calls
+        XCTAssertEqual(total, 2 + store.states.count)
+        XCTAssertTrue(store.refreshingServiceIDs.isEmpty)
+    }
+
     func testOldConfigDefaultsToEmptyAccountList() throws {
         let config = try JSONDecoder().decode(AppConfig.self, from: Data("{}".utf8))
         XCTAssertTrue(config.codexAccounts.isEmpty)

@@ -3,6 +3,39 @@ import SwiftUI
 @testable import TokenDeck
 
 final class ProviderAPITests: XCTestCase {
+    func testOpenRouterKeyAndAccountScopes() async throws {
+        let ordinary = ProviderAPIFetcher(serviceID: "openrouter", kind: .openRouter,
+            readKey: { _ in "synthetic" }, request: { url, _ in
+                XCTAssertEqual(url, "https://openrouter.ai/api/v1/key")
+                return (["data": ["usage": 2.5, "limit": 10, "limit_remaining": 7.5,
+                                   "is_management_key": false, "limit_reset": "monthly"]], 200)
+            })
+        let keyOutcome = await ordinary.fetch()
+        let key = try XCTUnwrap(try info(keyOutcome).openRouter)
+        XCTAssertEqual(key.scope, .key)
+        XCTAssertEqual(key.remaining, 7.5)
+        XCTAssertEqual(key.reset, "monthly")
+        let management = ProviderAPIFetcher(serviceID: "openrouter", kind: .openRouter,
+            readKey: { _ in "synthetic" }, request: { url, _ in
+                if url.hasSuffix("/key") { return (["data": ["is_management_key": true]], 200) }
+                XCTAssertEqual(url, "https://openrouter.ai/api/v1/credits")
+                return (["data": ["total_credits": 20, "total_usage": 4.25]], 200)
+            })
+        let accountOutcome = await management.fetch()
+        let account = try XCTUnwrap(try info(accountOutcome).openRouter)
+        XCTAssertEqual(account.scope, .account)
+        XCTAssertEqual(account.remaining, 15.75)
+        XCTAssertEqual(account.used, 4.25)
+        let unlimited = try info(ordinary.parse(["data": ["usage": 0, "limit": NSNull(), "limit_remaining": NSNull()]])).openRouter
+        XCTAssertNil(unlimited?.remaining)
+        XCTAssertNil(unlimited?.limit)
+        for bad: Any in [true, "NaN", -1] {
+            guard case .failure = ordinary.parse(["data": ["usage": bad]]) else { return XCTFail("Invalid usage accepted") }
+        }
+        let old = try JSONDecoder().decode(APIInfo.self, from: Data("{}".utf8))
+        XCTAssertNil(old.openRouter)
+    }
+
     private let balance: [String: Any] = ["is_available": false, "balance_infos": [
         ["currency": "CNY", "total_balance": "0.00", "topped_up_balance": "0", "granted_balance": "0"],
         ["currency": "USD", "total_balance": "12.34", "topped_up_balance": "10.00", "granted_balance": "2.34"]]]
@@ -82,7 +115,9 @@ final class ProviderAPITests: XCTestCase {
         _ = NSApplication.shared
         for (name, parsed) in [
             ("deepseek", try info(ProviderAPIFetcher(serviceID: "deepseek", kind: .deepseek).parse(balance))),
-            ("yicloud", APIInfo(balances: nil, isAvailable: nil, models: ["Kimi-K3"]))] {
+            ("yicloud", APIInfo(balances: nil, isAvailable: nil, models: ["Kimi-K3"])),
+            ("openrouter", APIInfo(balances: nil, isAvailable: nil, models: nil,
+                openRouter: OpenRouterInfo(scope: .key, used: 2.5, remaining: 7.5, limit: 10, reset: "monthly")))] {
             let service = "api-test-" + UUID().uuidString
             let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache/usage-dashboard/\(service).json")
             defer { try? FileManager.default.removeItem(at: path) }
@@ -90,13 +125,14 @@ final class ProviderAPITests: XCTestCase {
             let cached = try XCTUnwrap(UsageCache.read(service)?.usage.apiInfo)
             XCTAssertEqual(cached.models, parsed.models)
             XCTAssertEqual(cached.balances?.first?.total, parsed.balances?.first?.total)
+            XCTAssertEqual(cached.openRouter?.remaining, parsed.openRouter?.remaining)
             let config = ServiceConfig(id: name, title: name, accent: "#4D6BFE", category: .apiUsage,
-                                       fetcher: name == "deepseek" ? .deepseek : .yicloud)
+                                       fetcher: name == "deepseek" ? .deepseek : (name == "openrouter" ? .openRouter : .yicloud))
             let runtime = ServiceRuntime(config: config, status: .ok(Usage(apiInfo: parsed), fetchedAt: Date()))
             let relay = String(decoding: relayPayloadJSON(states: [runtime], lastUpdated: nil), as: UTF8.self)
             XCTAssertTrue(relay.contains("apiInfo"))
             XCTAssertFalse(relay.contains("apiKey"))
-            let host = NSHostingView(rootView: ServiceCardView(runtime: runtime).frame(width: 360).padding(12).background(Color(white: 0.12)))
+            let host = NSHostingView(rootView: ServiceCardView(runtime: runtime, onRefresh: {}).frame(width: 360).padding(12).background(Color(white: 0.12)))
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 384, height: 360), styleMask: [.borderless], backing: .buffered, defer: false)
             window.contentView = host
             host.layoutSubtreeIfNeeded()

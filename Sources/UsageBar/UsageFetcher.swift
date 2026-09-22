@@ -348,7 +348,7 @@ func makeFetcher(for config: ServiceConfig) -> UsageFetcher? {
         return CodexFetcher()
     case .newAPI:
         return NewAPIFetcher(config: config)
-    case .deepseek, .yicloud:
+    case .deepseek, .yicloud, .openRouter:
         return ProviderAPIFetcher(serviceID: config.id, kind: config.fetcher)
     case .unsupported:
         return nil

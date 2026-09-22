@@ -6,6 +6,7 @@ final class UsageStore: ObservableObject {
     @Published private(set) var states: [ServiceRuntime]
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var isRefreshing = false
+    @Published private(set) var refreshingServiceIDs: Set<String> = []
     @Published private(set) var config: AppConfig
     @Published private(set) var configSaveError: String?
     @Published private(set) var activeAlertCount = 0
@@ -320,9 +321,53 @@ final class UsageStore: ObservableObject {
         publishActiveAlerts()
     }
 
+    func canRefreshService(_ id: String) -> Bool {
+        !isRefreshing && !refreshingServiceIDs.contains(id) && refreshingServiceIDs.count < 4
+            && states.contains { $0.id == id }
+    }
+
+    func refreshService(_ id: String) async {
+        synchronizeCurrentAccount()
+        guard canRefreshService(id), let runtime = states.first(where: { $0.id == id }),
+              let generation = generations[id] else { return }
+        refreshingServiceIDs.insert(id)
+        defer {
+            refreshingServiceIDs.remove(id)
+            if refreshingServiceIDs.isEmpty && refreshAgain {
+                Task { await refresh() }
+            }
+        }
+        let credentials = runtime.config.fetcher == .codexWham
+            ? (id == currentAccountID ? currentCredentials : dependencies.savedCredentials(id)) : nil
+        let outcome = await dependencies.fetch(runtime.config, credentials)
+        if synchronizeCurrentAccount() { refreshAgain = true }
+        guard generations[id] == generation else { return }
+        apply(outcome, to: id)
+        lastUpdated = Date()
+    }
+
+    @discardableResult
+    func configureOpenRouter(_ key: String) -> Bool {
+        var next = config
+        do {
+            try ProviderAPIImport.apply(["openrouter": key], config: &next, saveKey: dependencies.saveAPIKey)
+            guard applyConfig(next) else { return false }
+            generations["openrouter"] = UUID()
+            if isRefreshing || !refreshingServiceIDs.isEmpty {
+                refreshAgain = true
+            } else {
+                Task { await refreshService("openrouter") }
+            }
+            return true
+        } catch {
+            configSaveError = "OpenRouter 保存失败，请检查 Key 或钥匙串权限后重试"
+            return false
+        }
+    }
+
     func refresh() async {
         synchronizeCurrentAccount()
-        guard !isRefreshing else { refreshAgain = true; return }
+        guard !isRefreshing, refreshingServiceIDs.isEmpty else { refreshAgain = true; return }
         isRefreshing = true
         defer { isRefreshing = false }
         repeat {
@@ -333,6 +378,7 @@ final class UsageStore: ObservableObject {
                     ? (rt.id == currentAccountID ? currentCredentials : dependencies.savedCredentials(rt.id)) : nil
                 return (rt.config, credentials, generations[rt.id]!)
             }
+            refreshingServiceIDs = Set(jobs.map { $0.0.id })
             await withTaskGroup(of: (String, UUID, FetchOutcome).self) { group in
                 var iterator = jobs.makeIterator()
                 func enqueue() {
@@ -341,6 +387,7 @@ final class UsageStore: ObservableObject {
                 }
                 for _ in 0..<min(4, jobs.count) { enqueue() }
                 for await (id, generation, outcome) in group {
+                    refreshingServiceIDs.remove(id)
                     if synchronizeCurrentAccount() { refreshAgain = true }
                     if generations[id] == generation { apply(outcome, to: id) }
                     enqueue()

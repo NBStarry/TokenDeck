@@ -72,6 +72,8 @@ Android SDK、NDK、签名包、国内网络和真机运行说明见
 - **macOS 多账户**：保存任意数量的 Codex 订阅账号，当前登录账号自动置顶；凭证副本保存在钥匙串。
 - **API 渠道**：New-API 兼容网关展示余额、历史消耗、请求次数和按来源分组的模型列表。
 - **macOS API 扩展**：DeepSeek 按币种显示总余额、充值余额和赠金余额；易云 TokenFactory 显示密钥查询状态和授权模型，暂不提供额度查询。
+- **macOS OpenRouter**：设置中安全保存 Key；普通 Key 展示自身用量与剩余额度，管理 Key 展示账户余额，金额为 USD。
+- **macOS 单渠道刷新**：每张卡片右上角可独立刷新，显示进度并防止重复请求。
 - **状态回退**：后台定时刷新；取数失败时显示上次成功缓存并标记异常。
 - **分级告警**：5 小时与周窗口可独立设置阈值和规则，触发系统通知与菜单栏告警角标。
 - **显示定制**：控制渠道开关、卡片顺序、颜色和卡片内展示字段。
@@ -149,13 +151,18 @@ Claude 等原有订阅渠道的告警保持不变；其他 Codex 账号仍展示
 | Codex | `chatgpt.com/backend-api/wham/usage`；macOS 重置明细：同路径前缀的 `rate-limit-reset-credits`（GET） | 当前账号：`~/.codex/auth.json`；已添加账号：macOS 钥匙串 |
 | DeepSeek（macOS） | `api.deepseek.com/user/balance`（GET） | 本机钥匙串，以渠道 ID `deepseek` 引用 |
 | 易云（macOS） | `token-api.yicloud.com/v1/models`（GET） | 本机钥匙串，以渠道 ID `yicloud` 引用 |
+| OpenRouter（macOS） | `openrouter.ai/api/v1/key`；管理 Key 另查 `/api/v1/credits`（GET） | 设置中安全输入，保存至本机钥匙串 |
 | New-API | `<baseUrl>/api/user/self` 与 `<baseUrl>/api/pricing` | `~/.config/usage-bar/<credentialFile>` |
 
 DeepSeek 与易云从 Hermes 经 SSH 一次性导入已有 Key，后续由 Mac 直接查询，无需 aimax 在线。
-管理入口 `TokenDeck --import-api-keys` 从标准输入接收 JSON 对象（键为 `deepseek`、`yicloud`，值为对应 Key），仅保存到钥匙串并追加未存在的渠道；不要把 Key 放到命令参数或 shell 历史中。
+管理入口 `TokenDeck --import-api-keys` 从标准输入接收 JSON 对象（键为 `deepseek`、`yicloud`、`openrouter`，值为对应 Key），仅保存到钥匙串并追加未存在的渠道；不要把 Key 放到命令参数或 shell 历史中。
 重新导入会更新 Key，保留现有渠道顺序和显示选项。配置保存失败时，已写入钥匙串的 Key 保留，可重试导入；不回滚覆盖后续凭证更新。
 Hermes 更换 Key 后需要重新导入，不自动远程同步。DeepSeek 不展示未提供的历史消耗，易云查询成功不代表模型推理一定可用。
 这两个渠道不参与订阅额度告警；失败显示缓存时间或明确错误。relay 增加 `apiInfo` 字段，本轮未增加手机端展示。
+
+Mac 卡片右上角可单独刷新，刷新期间保留已有结果并显示进度；同一渠道不重复请求，最多四个单卡并发。整体刷新在单卡请求结束后执行。
+
+OpenRouter 在设置中输入 Key 后点击“保存并刷新”。普通 Key 显示自身累计用量、限额、剩余额度与重置周期；未设 Key 限额不代表账户余额无限。管理 Key 显示账户总额度减累计消耗后的余额。所有金额以 USD 显示，不进行模型调用。OpenRouter 手机展示尚未适配，relay 暂标记为 unsupported，兼容旧手机解析。
 
 New-API 的 `accessToken` 是个人设置中生成的**系统访问令牌**，不是“令牌管理”中的
 `sk-` 中转令牌。凭证只用于本机请求，不写入仓库，也不打印原始响应或 Bearer Token。

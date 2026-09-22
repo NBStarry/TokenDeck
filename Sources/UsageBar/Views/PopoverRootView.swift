@@ -26,7 +26,9 @@ struct PopoverRootView: View {
                                 .foregroundColor(Theme.subGray)
                         }
                         ForEach(store.states) { rt in
-                            ServiceCardView(runtime: rt)
+                            ServiceCardView(runtime: rt, refreshing: store.refreshingServiceIDs.contains(rt.id),
+                                            refreshEnabled: store.canRefreshService(rt.id),
+                                            onRefresh: { Task { await store.refreshService(rt.id) } })
                         }
                     }
                 }

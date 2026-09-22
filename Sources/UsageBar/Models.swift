@@ -157,6 +157,7 @@ enum FetcherKind: String, Codable {
     case newAPI
     case deepseek
     case yicloud
+    case openRouter
     case unsupported
 }
 
@@ -325,6 +326,7 @@ enum DisplayContent: String, CaseIterable, Identifiable {
     static func options(for config: ServiceConfig) -> [DisplayContent] {
         switch config.fetcher {
         case .deepseek: return [.balance, .updatedAt]
+        case .openRouter: return [.balance, .used, .updatedAt]
         case .yicloud: return [.models, .updatedAt]
         default: return options(for: config.category)
         }

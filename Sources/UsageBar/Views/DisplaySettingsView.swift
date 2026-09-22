@@ -44,6 +44,7 @@ struct DisplaySettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             CodexAccountSettingsView()
+            OpenRouterSettingsView()
 
             if showsRelayPanel { relayPanel }
 
