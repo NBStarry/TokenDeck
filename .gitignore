@@ -1,5 +1,6 @@
 .DS_Store
 .build/
+scripts/__pycache__/
 *.app/
 *.xcuserstate
 *.swp

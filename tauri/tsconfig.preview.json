@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "$lib/*": ["src/lib/*"] }
+  },
+  "include": ["preview/**/*.ts", "preview/**/*.svelte", "src/lib/components/**/*.svelte", "src/lib/types.ts", "src/lib/theme.ts"]
+}

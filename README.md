@@ -12,6 +12,8 @@
   &nbsp;·&nbsp;
   <a href="#界面"><strong>🖼️ 界面预览</strong></a>
   &nbsp;·&nbsp;
+  <a href="https://nbstarry.github.io/TokenDeck/"><strong>🌐 在线预览</strong></a>
+  &nbsp;·&nbsp;
   <a href="tauri/README-android.md"><strong>📱 Android 构建</strong></a>
 </p>
 
@@ -82,6 +84,14 @@ Android SDK、NDK、签名包、国内网络和真机运行说明见
 - **Android 小组件**：每个小组件实例可绑定一个渠道，在主屏显示窗口进度或 API 余额。
 
 ## 界面
+
+[打开在线预览](https://nbstarry.github.io/TokenDeck/)：复用产品卡片，公开展示获授权的一个个人 Codex 账号与 DeepSeek 真实用量。其他账号和渠道不会导出，公开数据中不含账号身份、凭证或本机地址。
+
+预览为只读快照：本机每 10 分钟同步到 `gh-pages`，GitHub Pages 发布可能稍有延迟；网页每分钟读取最新快照。本机离线或取数失败时保留原数据，超过 15 分钟显示未更新提示。网页“刷新快照”不会触发本机渠道查询。
+
+维护：在 `tauri/` 执行 `npm run build:preview`，随后在仓库根目录执行 `python3 scripts/publish-preview.py` 发布。导出器从本机 `~/.config/usage-bar/preview.json` 的 `codexServiceID` 精确匹配已批准账号，并固定包含 DeepSeek；缺失或重复时中止，不回退到当前账号。账号选择文件仅保存在本机，不能提交。部署树只包含静态页面和经过白名单过滤的 `usage.json`，源码在 `main`，公开产物在 `gh-pages`。
+
+本机定时同步由 `scripts/install-preview-updater.py` 安装用户级任务；停止同步可执行 `launchctl bootout gui/$(id -u)/app.tokendeck.preview`（当前登录会话），永久停用还需移走 `~/Library/LaunchAgents/app.tokendeck.preview.plist`。停止同步不会撤回已经公开的快照。前端开发与验收在 `tauri/` 执行 `npm run dev:preview`、`npm run check:preview`、`npm run build:preview`；仓库根目录执行 `python3 scripts/test-preview-export.py`。
 
 以下为旧版单账号界面示意；新版增加多账户列表和固定顶部导航。
 
