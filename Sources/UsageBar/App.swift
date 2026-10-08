@@ -9,6 +9,18 @@ struct TokenDeckApp {
         // 隐藏 CLI 模式:--fetch <claude|codex>,跑一次取数并打印 JSON 后退出。
         // 用于无头验证取数层,与 GUI 共用同一套 Fetcher。
         let args = CommandLine.arguments
+        if args.contains("--check-keychain") {
+            CredentialStore.disableAutomaticPrompts()
+            do {
+                let report = try CredentialStore.configuredCredentialReport()
+                print(report.message)
+                exit(report.failures.isEmpty ? 0 : 1)
+            } catch { print("无法读取钥匙串验证配置"); exit(1) }
+        }
+        if args.contains("--authorize-keychain") {
+            do { try CredentialStore.authorizeConfiguredCredentials(); exit(0) }
+            catch { exit(1) }
+        }
         if args.contains("--import-api-keys") {
             do {
                 let data = FileHandle.standardInput.readDataToEndOfFile()
@@ -81,6 +93,7 @@ struct TokenDeckApp {
             return
         }
 
+        CredentialStore.disableAutomaticPrompts()
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate

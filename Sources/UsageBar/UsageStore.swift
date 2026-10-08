@@ -27,6 +27,18 @@ final class UsageStore: ObservableObject {
     private var generations: [String: UUID] = [:]
     private var refreshAgain = false
     @Published private(set) var isSwitchingAccount = false
+    @Published private(set) var isAuthorizingKeychain = false
+    @Published private(set) var keychainNotice: String?
+
+    func authorizeKeychain() async {
+        guard !isAuthorizingKeychain else { return }
+        isAuthorizingKeychain = true
+        keychainNotice = nil
+        let notice = await KeychainAuthorization.request()
+        isAuthorizingKeychain = false
+        keychainNotice = notice
+        await refresh()
+    }
 
     func needsCLILogin(_ id: String) -> Bool {
         dependencies.savedCredentials(id)?.canLoginToCLI != true
@@ -135,8 +147,9 @@ final class UsageStore: ObservableObject {
     }
 
     func accountName(_ id: String) -> String {
-        let creds = id == currentAccountID ? currentCredentials : dependencies.savedCredentials(id)
-        return creds?.displayName ?? "Codex 账号 " + id.suffix(6)
+        if id == currentAccountID, let currentCredentials { return currentCredentials.displayName }
+        if let name = config.codexAccounts.first(where: { $0.id == id })?.name, !name.isEmpty { return name }
+        return "Codex 账号 " + id.suffix(6)
     }
 
     func removeAccount(_ id: String) {

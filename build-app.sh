@@ -1,5 +1,5 @@
 #!/bin/bash
-# 编译并组装 TokenDeck.app(菜单栏 App:无 Dock 图标 + 开机自启 + ad-hoc 签名)。
+# 编译并组装 TokenDeck.app(菜单栏 App:无 Dock 图标 + 开机自启 + 固定身份签名)。
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -8,16 +8,34 @@ APP_NAME="TokenDeck"
 BUNDLE_ID="${BUNDLE_ID:-app.tokenusagedashboard.menu}"
 VERSION="1.0.0"
 APP="${APP_NAME}.app"
+BUILD_PATH="${SWIFT_BUILD_PATH:-.build}"
+SIGNING_DIR="${TOKENDECK_SIGNING_DIR:-$HOME/.config/tokendeck/signing}"
+SIGNING_IDENTITY="${CODE_SIGN_IDENTITY:-}"
+SIGN_ARGS=()
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+    if [[ ! -f "$SIGNING_DIR/identity" || ! -f "$SIGNING_DIR/password" ]]; then
+        echo "Run bash scripts/setup-local-signing.sh once, or set CODE_SIGN_IDENTITY." >&2
+        exit 1
+    fi
+    SIGNING_IDENTITY=$(cat "$SIGNING_DIR/identity")
+    security unlock-keychain -p "$(cat "$SIGNING_DIR/password")" "$SIGNING_DIR/signing.keychain-db"
+    SIGN_ARGS=(--keychain "$SIGNING_DIR/signing.keychain-db")
+fi
+if [[ "$SIGNING_IDENTITY" == "-" ]]; then
+    echo "Ad-hoc signing changes keychain identity between builds; use a persistent certificate." >&2
+    exit 1
+fi
 
 echo "==> swift build -c release"
-swift build -c release
+swift build --scratch-path "$BUILD_PATH" -c release
 
 echo "==> 组装 ${APP}"
 rm -rf "${APP}"
 mkdir -p "${APP}/Contents/MacOS"
 mkdir -p "${APP}/Contents/Resources"
+mkdir -p "${APP}/Contents/Helpers"
 
-cp ".build/release/${APP_NAME}" "${APP}/Contents/MacOS/${APP_NAME}"
+cp "$BUILD_PATH/release/${APP_NAME}" "${APP}/Contents/MacOS/${APP_NAME}"
 
 # App 图标(若存在 AppIcon.icns 则嵌入)
 ICON_LINE=""
@@ -46,8 +64,28 @@ ${ICON_LINE}
 </plist>
 PLIST
 
-echo "==> ad-hoc 签名"
-codesign --force --deep --sign - "${APP}"
+echo "==> 固定钥匙串助手"
+# Re-signing self-signed code can change its partition identity. Reuse the exact
+# helper bytes unless its source, architecture, bundle identity or signer changes.
+HELPER_SOURCE="Sources/KeychainHelper/main.swift"
+HELPER_HASH=$(shasum -a 256 "$HELPER_SOURCE" | awk '{print $1}')
+HELPER_KEY=$(printf '%s\n' "$HELPER_HASH" "$SIGNING_IDENTITY" "$BUNDLE_ID" "$(uname -m)" | shasum -a 256 | awk '{print $1}')
+HELPER_CACHE="$SIGNING_DIR/helpers/$HELPER_KEY"
+mkdir -p "$HELPER_CACHE"
+if [[ ! -f "$HELPER_CACHE/TokenDeckKeychain" ]]; then
+    HELPER_TEMP=$(mktemp -d "$HELPER_CACHE/build.XXXXXX")
+    trap 'rm -rf "$HELPER_TEMP"' EXIT
+    swiftc -O "$HELPER_SOURCE" -o "$HELPER_TEMP/TokenDeckKeychain"
+    codesign --force --identifier "$BUNDLE_ID" --sign "$SIGNING_IDENTITY" "${SIGN_ARGS[@]}" "$HELPER_TEMP/TokenDeckKeychain"
+    codesign --verify --strict "$HELPER_TEMP/TokenDeckKeychain"
+    mv "$HELPER_TEMP/TokenDeckKeychain" "$HELPER_CACHE/TokenDeckKeychain"
+fi
+codesign --verify --strict "$HELPER_CACHE/TokenDeckKeychain"
+cp "$HELPER_CACHE/TokenDeckKeychain" "$APP/Contents/Helpers/TokenDeckKeychain"
+
+echo "==> 固定身份签名"
+codesign --force --sign "$SIGNING_IDENTITY" "${SIGN_ARGS[@]}" "${APP}"
+codesign --verify --deep --strict "${APP}"
 
 echo "==> 完成: $(pwd)/${APP}"
 echo "    运行:  open ${APP}"

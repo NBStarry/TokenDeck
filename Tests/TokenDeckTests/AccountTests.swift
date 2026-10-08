@@ -82,6 +82,20 @@ private final class Fixture {
 }
 
 final class AccountTests: XCTestCase {
+    @MainActor func testStartupAndAccountNamesDoNotReadKeychain() {
+        let fixture = Fixture()
+        let config = fixture.config(count: 2)
+        var dependencies = fixture.dependencies()
+        dependencies.savedCredentials = { _ in
+            XCTFail("Rendering and startup must not request stored credentials")
+            return nil
+        }
+        let store = UsageStore(config: config, dependencies: dependencies)
+        XCTAssertEqual(store.states.count, 2)
+        for account in config.codexAccounts { XCTAssertEqual(store.accountName(account.id), account.name) }
+        _ = store.synchronizeCurrentAccount()
+    }
+
     @MainActor func testRotatingAPIKeyDiscardsInflightResultAndRefreshes() async throws {
         let fixture = Fixture()
         var config = fixture.config(count: 0)

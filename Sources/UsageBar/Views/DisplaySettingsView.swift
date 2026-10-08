@@ -43,6 +43,15 @@ struct DisplaySettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Button(store.isAuthorizingKeychain ? "正在等待系统授权…" : "授权钥匙串访问") {
+                    Task { await store.authorizeKeychain() }
+                }
+                .disabled(store.isAuthorizingKeychain)
+                Text("首次使用凭证助手时选择“始终允许”。主应用更新复用同一助手；助手自身升级时可能需重新授权。")
+                    .font(.system(size: 10)).foregroundColor(Theme.subGray)
+                if let notice = store.keychainNotice { Text(notice).font(.system(size: 10)) }
+            }
             CodexAccountSettingsView()
             OpenRouterSettingsView()
 

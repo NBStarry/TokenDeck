@@ -38,7 +38,7 @@ struct ClaudeFetcher: UsageFetcher {
 
     func fetch() async -> FetchOutcome {
         guard let token = CredentialStore.claudeToken() else {
-            return .failure("未找到 Claude 登录凭证,请运行 claude 登录")
+            return .failure("Claude 凭证不可用，请在设置中授权钥匙串访问或重新登录 Claude")
         }
         let headers = [
             "Authorization": "Bearer \(token)",

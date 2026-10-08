@@ -31,24 +31,73 @@ enum CredentialStore {
         return tok
     }
 
+    // Existing entries use the macOS file-based keychain, whose interaction policy
+    // is process-wide. Packaged apps isolate interaction inside the stable helper.
+    static func disableAutomaticPrompts() {
+        SecKeychainSetUserInteractionAllowed(false)
+    }
+
     private static func runSecurity(service: String) -> String? {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        proc.arguments = ["find-generic-password", "-s", service, "-w"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = Pipe()
-        do {
-            try proc.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            proc.waitUntilExit()
-            guard proc.terminationStatus == 0 else { return nil }
-            let s = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return (s?.isEmpty == false) ? s : nil
-        } catch {
-            return nil
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service, kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne]
+        let (status, result) = readKeychain(query)
+        guard status == errSecSuccess, let data = result else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func authorizeConfiguredCredentials() throws {
+        let report = try configuredCredentialReport { readKeychain($0, interactive: true).0 }
+        guard report.failures.isEmpty else {
+            throw NSError(domain: "KeychainAuthorization", code: 1)
         }
+    }
+
+    static func configuredCredentialReport(
+        read: ([String: Any]) -> OSStatus = readKeychainStatus
+    ) throws -> KeychainAuthorization.Report {
+        let config = try JSONDecoder().decode(AppConfig.self,
+            from: Data(contentsOf: AppConfigStore.configURL))
+        var entries = config.codexAccounts.map { ($0.name, codexKeychainQuery($0.id)) }
+        for service in config.services where service.enabled {
+            if [.deepseek, .yicloud, .openRouter].contains(service.fetcher) {
+                entries.append((service.title, apiKeyQuery(service.id)))
+            } else if service.fetcher == .claudeOAuth {
+                entries.append((service.title, [kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: "Claude Code-credentials"]))
+            }
+        }
+        return KeychainAuthorization.inspect(entries: entries, read: read)
+    }
+
+    private static func readKeychainStatus(_ query: [String: Any]) -> OSStatus {
+        readKeychain(query).0
+    }
+
+    private static func readKeychain(_ query: [String: Any], interactive: Bool = false) -> (OSStatus, Data?) {
+        if KeychainBridge.isPackaged {
+            return KeychainBridge.perform("read", query: query, interactive: interactive)
+        }
+        var query = query
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        return (status, result as? Data)
+    }
+
+    private static func writeKeychain(_ query: [String: Any], data: Data) throws {
+        if KeychainBridge.isPackaged {
+            try checkKeychain(KeychainBridge.perform("write", query: query, data: data, interactive: true).0)
+            return
+        }
+        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var item = query
+            item[kSecValueData as String] = data
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            try checkKeychain(SecItemAdd(item as CFDictionary, nil))
+        } else { try checkKeychain(status) }
     }
 
     // ─── Codex / GPT ──────────────────────────────────────────
@@ -153,33 +202,22 @@ enum CredentialStore {
     }
 
     static func savedCodexCredentials(_ id: String) -> CodexCreds? {
-        var query = codexKeychainQuery(id)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
+        let (status, data) = readKeychain(codexKeychainQuery(id))
+        guard status == errSecSuccess, let data,
               let creds = try? JSONDecoder().decode(CodexCreds.self, from: data),
               creds.identity == id else { return nil }
         return creds
     }
 
     static func saveCodexCredentials(_ creds: CodexCreds) throws {
-        let query = codexKeychainQuery(creds.identity)
-        let data = try JSONEncoder().encode(creds)
-        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if status == errSecItemNotFound {
-            var item = query
-            item[kSecValueData as String] = data
-            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            try checkKeychain(SecItemAdd(item as CFDictionary, nil))
-        } else {
-            try checkKeychain(status)
-        }
+        try writeKeychain(codexKeychainQuery(creds.identity), data: JSONEncoder().encode(creds))
     }
 
     static func removeCodexCredentials(_ id: String) throws {
-        let status = SecItemDelete(codexKeychainQuery(id) as CFDictionary)
+        let query = codexKeychainQuery(id)
+        let status = KeychainBridge.isPackaged
+            ? KeychainBridge.perform("delete", query: query, interactive: true).0
+            : SecItemDelete(query as CFDictionary)
         if status != errSecItemNotFound { try checkKeychain(status) }
     }
 
@@ -197,29 +235,17 @@ enum CredentialStore {
     }
 
     static func apiKey(_ id: String) throws -> String? {
-        var query = apiKeyQuery(id)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let (status, data) = readKeychain(apiKeyQuery(id))
         if status == errSecItemNotFound { return nil }
         try checkKeychain(status)
-        guard let data = result as? Data, let key = String(data: data, encoding: .utf8), !key.isEmpty else {
+        guard let data, let key = String(data: data, encoding: .utf8), !key.isEmpty else {
             throw NSError(domain: "APIKey", code: 1)
         }
         return key
     }
 
     static func saveAPIKey(_ key: String, id: String) throws {
-        let query = apiKeyQuery(id)
-        let data = Data(key.utf8)
-        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if status == errSecItemNotFound {
-            var item = query
-            item[kSecValueData as String] = data
-            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            try checkKeychain(SecItemAdd(item as CFDictionary, nil))
-        } else { try checkKeychain(status) }
+        try writeKeychain(apiKeyQuery(id), data: Data(key.utf8))
     }
 
     // ─── New-API 兼容网关 ─────────────────────────────────────

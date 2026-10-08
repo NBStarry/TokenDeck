@@ -28,6 +28,8 @@ macOS 端负责读取本机持续更新的登录凭证并聚合用量；Android 
 ### macOS
 
 ```bash
+# 首次创建固定的本机签名身份
+bash scripts/setup-local-signing.sh
 ./build-app.sh
 open TokenDeck.app
 
@@ -37,7 +39,11 @@ open /Applications/TokenDeck.app
 ```
 
 `build-app.sh` 会执行 Release 编译、组装 `TokenDeck.app`、嵌入图标并完成
-ad-hoc 签名。菜单栏图标右键可开启基于 `SMAppService` 的开机自启。
+固定证书签名。签名材料保存在 `~/.config/tokendeck/signing/` 的独立钥匙串中，更新时必须保留；也可通过 `CODE_SIGN_IDENTITY` 指定已有身份。自签名应用即使证书不变，macOS 钥匙串仍可能以编译产生的 `cdhash` 区分访问者。因此，凭证操作统一交给 `Contents/Helpers/TokenDeckKeychain`，其已签名二进制缓存在签名目录的 `helpers/` 中；助手源码和签名配置不变时原样复用，主界面更新不改变助手身份。不要清理该缓存或使用 `codesign --deep --force` 重签助手。
+
+启动和自动刷新不弹出钥匙串授权框；需要授权时，在设置中点击“授权钥匙串访问”。首次启用助手时，现有条目可能需要逐项选择“始终允许”；助手自身升级或签名改变后也可能需要重新授权。授权后会启动新的无交互助手逐项验证，只有读取全部成功才报告授权完成。助手与主应用相互检查签名，凭证只经匿名管道传输，不保存系统密码，不放宽钥匙串 ACL。仍保留每个账号独立的凭证条目；服务器令牌过期需另外登录。
+
+授权期间界面继续可用。菜单栏图标右键可开启基于 `SMAppService` 的开机自启。
 
 从旧名 `TokenUsageDashboard.app` 升级时，先在旧 App 中关闭开机自启并退出，再安装
 `TokenDeck.app`，最后重新开启一次开机自启。两者沿用同一 Bundle ID，但不应同时保留为登录项。
@@ -303,6 +309,12 @@ swift test --scratch-path .build/multi-account-validation
 
 # 可选：真实钥匙串集成测试，仅创建随机身份的模拟凭证，结束后清理
 TOKENDECK_KEYCHAIN_TEST=1 swift test --scratch-path .build/multi-account-validation --filter KeychainIntegrationTests
+
+# 固定签名打包后：随机合成条目验证助手拒绝非授权调用、跨主程序版本读取
+python3 scripts/test-keychain-helper.py
+
+# 已安装应用：只读验证凭证访问，不弹授权框、不输出凭证
+/Applications/TokenDeck.app/Contents/MacOS/TokenDeck --check-keychain
 
 # 十账号隔离验收窗口，复用 480 点高的正式界面；可切换模拟当前账号
 # 不读取真实凭证、不启动中转、不发送通知

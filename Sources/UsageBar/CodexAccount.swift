@@ -24,7 +24,7 @@ struct UsageDependencies {
     var notify: (String, String) -> Void = { AlertNotifier.send(title: $0, body: $1) }
     var fetch: @Sendable (ServiceConfig, CredentialStore.CodexCreds?) async -> FetchOutcome = { config, creds in
         if config.fetcher == .codexWham {
-            guard let creds else { return .failure("登录凭证不可用，请登录该账号后添加／更新") }
+            guard let creds else { return .failure("未能读取登录凭证，请在设置中授权钥匙串访问并查看验证结果") }
             return await CodexFetcher(credentials: creds).fetch()
         }
         guard let fetcher = makeFetcher(for: config) else { return .failure("未支持的取数类型") }
