@@ -6,19 +6,34 @@ struct ServiceCardView: View {
     var refreshEnabled = true
     var onRefresh: (() -> Void)? = nil
 
+    var dragProvider: (() -> NSItemProvider)?
+
+    @AppStorage private var collapsed: Bool
+
+    init(runtime: ServiceRuntime, refreshing: Bool = false, refreshEnabled: Bool = true, onRefresh: (() -> Void)? = nil, dragProvider: (() -> NSItemProvider)? = nil) {
+        self.dragProvider = dragProvider
+        self.runtime = runtime
+        self.refreshing = refreshing
+        self.refreshEnabled = refreshEnabled
+        self.onRefresh = onRefresh
+        _collapsed = AppStorage(wrappedValue: false, "cardCollapsed." + runtime.config.id)
+    }
+
     private var accent: Color { Color(hex: runtime.config.accent) }
     private var display: ServiceDisplayOptions { runtime.config.display }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            if runtime.isCurrentAccount {
-                Text("当前使用")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(Color(hex: "#10A37F"))
-                    .padding(.bottom, 8)
+            if !collapsed {
+                if runtime.isCurrentAccount {
+                    Text("当前使用")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(Color(hex: "#10A37F"))
+                        .padding(.bottom, 8)
+                }
+                content
             }
-            content
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -32,7 +47,15 @@ struct ServiceCardView: View {
 
     // ─── 头部:色点 + 名称 + plan 徽章 ───
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: collapsed ? 4 : 8) {
+            if let dragProvider {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 11)).foregroundColor(Theme.subGray)
+                    .frame(width: 18, height: 24).contentShape(Rectangle())
+                    .onDrag(dragProvider)
+                    .help("拖动调整顺序；也可使用卡片菜单上移或下移")
+                    .accessibilityLabel("拖动 " + runtime.config.title)
+            }
             Circle()
                 .fill(accent)
                 .frame(width: 9, height: 9)
@@ -40,8 +63,29 @@ struct ServiceCardView: View {
             Text(runtime.config.title)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(.white)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(runtime.config.title)
+                .frame(minWidth: collapsed ? 45 : 0, alignment: .leading)
+            if collapsed {
+                if runtime.isCurrentAccount {
+                    Image(systemName: "checkmark.circle.fill").foregroundColor(Color(hex: "#10A37F"))
+                        .accessibilityLabel("当前使用")
+                }
+                Text(Self.summary(runtime.status, display: display))
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.labelGray)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .layoutPriority(1)
+                    .help(Self.summary(runtime.status, display: display))
+                if let warning = warning {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundColor(Theme.amber)
+                        .help(warning).accessibilityLabel(warning)
+                }
+            }
             Spacer(minLength: 0)
-            if display.plan, let plan = currentPlan {
+            if !collapsed, display.plan, let plan = currentPlan {
                 Text(plan)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.white)
@@ -60,8 +104,68 @@ struct ServiceCardView: View {
                 .help("刷新此渠道")
                 .accessibilityLabel("刷新 " + runtime.config.title)
             }
+            Button { collapsed.toggle() } label: {
+                Image(systemName: collapsed ? "chevron.down" : "chevron.up")
+                    .font(.system(size: 12)).frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(Theme.subGray)
+            .help(collapsed ? "展开" : "折叠")
+            .accessibilityLabel((collapsed ? "展开 " : "折叠 ") + runtime.config.title)
+            .accessibilityValue(collapsed ? "已折叠" : "已展开")
+            .fixedSize()
         }
-        .padding(.bottom, 12)
+        .padding(.bottom, collapsed ? 0 : 12)
+    }
+
+    private var warning: String? {
+        switch runtime.status {
+        case .stale(_, _, let error): return "缓存 · " + error
+        case .error(let error): return error
+        default: return nil
+        }
+    }
+
+    static func summary(_ status: ServiceStatus, display: ServiceDisplayOptions) -> String {
+        switch status {
+        case .loading: return "加载中…"
+        case .error: return "加载失败"
+        case .ok(let usage, _): return usageSummary(usage, display: display)
+        case .stale(let usage, _, _): return "缓存 · " + usageSummary(usage, display: display)
+        }
+    }
+
+    private static func usageSummary(_ usage: Usage, display: ServiceDisplayOptions) -> String {
+        func number(_ value: Double) -> String { value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1))) }
+        func money(_ value: Double) -> String { String(format: "%.2f", value) }
+        if let info = usage.apiInfo {
+            if let quotas = info.quotas {
+                let parts = quotas.compactMap { quota -> String? in
+                    let name = quota.id == "cloud_desktop" ? "云" : quota.id == "non_cloud" ? "非云" : quota.name
+                    if display.balance { return name + "余" + number(quota.remaining) }
+                    if display.used { return name + "用" + number(quota.used) }
+                    return nil
+                }
+                return parts.isEmpty ? "额度已隐藏" : parts.joined(separator: " / ")
+            }
+            if let router = info.openRouter {
+                let scope = router.scope == .account ? "账户" : "Key"
+                if display.balance {
+                    return scope + (router.remaining.map { "余$" + money($0) } ?? (router.limit == nil ? "未设限额" : "额度未知"))
+                }
+                return display.used ? scope + "用$" + money(router.used) : "额度已隐藏"
+            }
+            if let balances = info.balances {
+                let amount = display.balance ? balances.map { $0.currency + " " + money($0.total) }.joined(separator: " / ") : "余额已隐藏"
+                return (info.isAvailable == false ? "不可用 · " : "") + (amount.isEmpty ? "余额未知" : amount)
+            }
+            if info.models != nil { return "暂无额度查询" }
+        }
+        if let balance = usage.balance {
+            return display.balance ? "余" + balance.currency + money(balance.balance) : "余额已隐藏"
+        }
+        let windows = usage.windows.filter { $0.kind == .fiveHour ? display.fiveHour : display.weekly }
+        return windows.isEmpty ? "无可展示内容" : windows.map { $0.label + " " + number(min(100, max(0, $0.pct))) + "%" }.joined(separator: " / ")
     }
 
     @ViewBuilder

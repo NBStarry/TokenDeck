@@ -82,6 +82,74 @@ private final class Fixture {
 }
 
 final class AccountTests: XCTestCase {
+    @MainActor func testCardOrderPersistsAcrossRefreshIdentityAndConfigReload() async throws {
+        let fixture = Fixture()
+        fixture.current = credentials(0)
+        let config = fixture.config(count: 2, claude: true)
+        let store = UsageStore(config: config, dependencies: fixture.dependencies())
+        let a = credentials(0).identity
+        let b = credentials(1).identity
+        XCTAssertEqual(store.states.map(\.id), [a, "claude", b])
+        store.moveCard(a, to: b)
+        XCTAssertEqual(store.states.map(\.id), ["claude", b, a])
+        let encoded = try JSONEncoder().encode(XCTUnwrap(fixture.persisted))
+        let restored = try JSONDecoder().decode(AppConfig.self, from: encoded)
+        XCTAssertEqual(restored.cardOrder, ["claude", b, a])
+        fixture.current = credentials(1)
+        store.synchronizeCurrentAccount()
+        await store.refresh()
+        XCTAssertEqual(store.states.map(\.id), ["claude", b, a])
+        XCTAssertTrue(store.states[1].isCurrentAccount)
+        let reloaded = UsageStore(config: restored, dependencies: fixture.dependencies())
+        XCTAssertEqual(reloaded.states.map(\.id), ["claude", b, a])
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: relayPayloadJSON(states: store.states, lastUpdated: nil)) as? [String: Any])
+        let services = try XCTUnwrap(json["services"] as? [[String: Any]])
+        XCTAssertEqual(services.compactMap { ($0["config"] as? [String: Any])?["id"] as? String }, ["claude", b, a])
+    }
+
+    @MainActor func testCardOrderMergesMissingDuplicateNewAndDisabledCards() throws {
+        let fixture = Fixture()
+        var config = fixture.config(count: 2, claude: true)
+        let a = credentials(0).identity
+        let b = credentials(1).identity
+        config.cardOrder = [b, "missing", b, "claude"]
+        var duplicate = config
+        duplicate.services.append(config.services[0])
+        XCTAssertEqual(UsageStore(config: duplicate, dependencies: fixture.dependencies()).states.map(\.id), [b, "claude", a])
+        let store = UsageStore(config: config, dependencies: fixture.dependencies())
+        XCTAssertEqual(store.states.map(\.id), [b, "claude", a])
+        store.setServiceEnabled("claude", enabled: false)
+        XCTAssertEqual(store.states.map(\.id), [b, a])
+        store.moveCard(a, to: b)
+        store.setServiceEnabled("claude", enabled: true)
+        XCTAssertEqual(store.states.map(\.id), [a, b, "claude"])
+        var renamed = store.config
+        renamed.codexAccounts[0].name = "Renamed"
+        XCTAssertEqual(UsageStore(config: renamed, dependencies: fixture.dependencies()).states.first?.id, a)
+        store.moveService("codex", by: -1)
+        XCTAssertTrue(store.config.cardOrder.isEmpty)
+    }
+
+    @MainActor func testInvalidOrFailedCardMoveDoesNotSaveOrChangeOrder() {
+        let fixture = Fixture()
+        let store = UsageStore(config: fixture.config(count: 2), dependencies: fixture.dependencies())
+        let before = store.states.map(\.id)
+        store.moveCard(before[0], to: before[0])
+        store.moveCard("external", to: before[1])
+        store.moveCard(before[0], by: -1)
+        XCTAssertNil(fixture.persisted)
+        fixture.failSave = true
+        store.moveCard(before[0], to: before[1])
+        XCTAssertEqual(store.states.map(\.id), before)
+        XCTAssertTrue(store.config.cardOrder.isEmpty)
+        XCTAssertNotNil(store.configSaveError)
+    }
+
+    func testOldConfigHasNoManualCardOrder() throws {
+        let old = Data("{\"refreshSeconds\":300,\"services\":[]}".utf8)
+        XCTAssertTrue(try JSONDecoder().decode(AppConfig.self, from: old).cardOrder.isEmpty)
+    }
+
     @MainActor func testStartupAndAccountNamesDoNotReadKeychain() {
         let fixture = Fixture()
         let config = fixture.config(count: 2)

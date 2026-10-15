@@ -151,6 +151,8 @@ npx tauri android build        # 其余环境变量同上
 
 ## 4. 移动端适配（已做）
 
+应用内每个账号渠道可用卡片右侧箭头独立折叠为一行。手机按渠道 ID 保存状态，刷新或重新打开后保留；新卡片默认展开。该选择不随 Mac 中转同步，也不改变主屏小组件。
+
 平台判定走 Rust `is_mobile` 命令（`cfg!(mobile)`，由 tauri-build 注入），前端
 `store.ts` 的 `mobile` store 在 `init()` 时一次性读取，运行期不变。
 

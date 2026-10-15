@@ -35,6 +35,7 @@ export interface BalanceInfo {
 }
 
 export interface APIInfo {
+  quotas?: { id: string; name: string; used: number; remaining: number; total: number; resetsAt: string }[] | null;
   balances?: { currency: string; total: number; toppedUp: number; granted: number }[] | null;
   isAvailable?: boolean | null;
   models?: string[] | null;

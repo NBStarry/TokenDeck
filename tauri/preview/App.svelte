@@ -86,7 +86,7 @@
   h2 { font-size: 16px; margin: 0; }
   .section-title { margin-bottom: 12px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(310px, 100%), 1fr)); gap: 16px; align-items: start; }
-  .grid :global(.card) { min-height: 170px; }
+  .grid :global(.card:not(.collapsed)) { min-height: 170px; }
   .grid :global(.card .sub-gray), .grid :global(.card .foot-gray), .grid :global(.provider small) { color: #aaaab2; }
   footer { border-top: 1px solid #303036; margin-top: 36px; padding-top: 20px; }
   .empty { padding: 48px 0; color: #aaa; }

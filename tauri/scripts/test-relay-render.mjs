@@ -26,5 +26,18 @@ try {
   const unavailable = structuredClone(snapshots[0]);
   delete unavailable.status.usage.resetCredits.credits;
   assert.match(render(Card, { props: { snapshot: unavailable } }).body, /到期明细暂不可用/);
+  const { cardSummary } = await server.ssrLoadModule('/src/lib/cardSummary.ts');
+  const quotaStatus = { kind: 'ok', usage: { windows: [], apiInfo: { quotas: [
+    { id: 'cloud_desktop', name: '云桌面／服务器', used: 125.5, remaining: 874.5, total: 1000, resetsAt: '' },
+    { id: 'non_cloud', name: '非云端', used: 20, remaining: 0, total: 20, resetsAt: '' }
+  ] } } };
+  assert.match(cardSummary(quotaStatus, display), /云余874.5.*非云余0/);
+  assert.match(cardSummary({ ...quotaStatus, kind: 'stale', error: 'offline' }, display), /^缓存/);
+  assert.equal(cardSummary({ kind: 'loading' }, display), '加载中…');
+  assert.equal(cardSummary({ kind: 'error', message: 'failure' }, display), '加载失败');
+  assert.equal(cardSummary(quotaStatus, { ...display, balance: false, used: false }), '额度已隐藏');
+  assert.match(cardSummary(snapshots[2].status, display), /CNY.*USD/);
+  assert.equal(cardSummary({ kind: 'ok', usage: { windows: [], balance: { balance: 0.04, currency: '$' } } }, display), '余$0.04');
+  assert.match(html[0], /aria-expanded="true"/);
   console.log('Relay card rendering checks passed');
 } finally { await server.close(); }

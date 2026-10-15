@@ -204,7 +204,28 @@ final class UsageStore: ObservableObject {
         guard newIndex != idx else { return }
         let item = next.services.remove(at: idx)
         next.services.insert(item, at: newIndex)
+        next.cardOrder = []
         applyConfig(next)
+    }
+
+    func moveCard(_ id: String, to targetID: String) {
+        let visible = states.map(\.id)
+        guard let source = visible.firstIndex(of: id),
+              let target = visible.firstIndex(of: targetID), source != target else { return }
+        var seen = Set<String>()
+        var order = (config.cardOrder + visible).filter { seen.insert($0).inserted }
+        order.removeAll { $0 == id }
+        guard let destination = order.firstIndex(of: targetID) else { return }
+        order.insert(id, at: destination + (source < target ? 1 : 0))
+        var next = config
+        next.cardOrder = order
+        applyConfig(next)
+    }
+
+    func moveCard(_ id: String, by delta: Int) {
+        guard let source = states.firstIndex(where: { $0.id == id }),
+              states.indices.contains(source + delta) else { return }
+        moveCard(id, to: states[source + delta].id)
     }
 
     func setDisplayContent(_ item: DisplayContent, for id: String, enabled: Bool) {
@@ -318,6 +339,11 @@ final class UsageStore: ObservableObject {
         }
         if let index = configs.firstIndex(where: { $0.id == currentAccountID }) {
             configs.insert(configs.remove(at: index), at: 0)
+        }
+        if !config.cardOrder.isEmpty {
+            var remaining = Dictionary(configs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let ordered = config.cardOrder.compactMap { remaining.removeValue(forKey: $0) }
+            configs = ordered + configs.filter { remaining[$0.id] != nil }
         }
         let ids = Set(configs.map(\.id))
         generations = generations.filter { ids.contains($0.key) }

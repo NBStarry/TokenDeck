@@ -21,6 +21,16 @@ struct APIInfo: Codable {
     let isAvailable: Bool?
     let models: [String]?
     var openRouter: OpenRouterInfo? = nil
+    var quotas: [EnvironmentQuota]? = nil
+}
+
+struct EnvironmentQuota: Codable, Identifiable {
+    let id: String
+    let name: String
+    let used: Double
+    let remaining: Double
+    let total: Double
+    let resetsAt: String
 }
 
 struct ProviderAPIFetcher: UsageFetcher {

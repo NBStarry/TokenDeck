@@ -59,6 +59,9 @@ struct DisplaySettingsView: View {
 
             AlertSettingsView()
 
+            Text("上移或下移渠道将清除手动卡片顺序，恢复渠道排序。")
+                .font(.system(size: 10)).foregroundColor(Theme.subGray)
+
             Text("渠道商")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.white.opacity(0.92))

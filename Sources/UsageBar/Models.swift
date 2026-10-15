@@ -483,8 +483,9 @@ struct AppConfig: Codable {
     var alerts: UsageAlertConfig
     var services: [ServiceConfig]
     var codexAccounts: [CodexAccount] = []
+    var cardOrder: [String] = []
 
-    enum CodingKeys: String, CodingKey { case refreshSeconds, alerts, services, codexAccounts }
+    enum CodingKeys: String, CodingKey { case refreshSeconds, alerts, services, codexAccounts, cardOrder }
 
     init(refreshSeconds: Int, alerts: UsageAlertConfig = .default, services: [ServiceConfig]) {
         self.refreshSeconds = refreshSeconds
@@ -495,6 +496,7 @@ struct AppConfig: Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         codexAccounts = try c.decodeIfPresent([CodexAccount].self, forKey: .codexAccounts) ?? []
+        cardOrder = try c.decodeIfPresent([String].self, forKey: .cardOrder) ?? []
         refreshSeconds = try c.decodeIfPresent(Int.self, forKey: .refreshSeconds) ?? 300
         alerts = try c.decodeIfPresent(UsageAlertConfig.self, forKey: .alerts) ?? .default
         services = try c.decodeIfPresent([ServiceConfig].self, forKey: .services)

@@ -1,0 +1,42 @@
+{
+  "workflow_version": "0.1.2",
+  "workflow_source": "../StarryBei-ai-config/workflow/v0.1.2",
+  "workflow_sha256": "04958f564240a1738b527fc1df857ebc330c367f147b0e0b1022fd8fa497e643",
+  "project": "TokenDeck",
+  "root_files": [
+    "AGENTS.md",
+    "README.md",
+    "STATUS.md",
+    "TODO.md",
+    ".gitignore",
+    "Package.swift",
+    "AppIcon.icns",
+    "make_icon.swift",
+    "build-app.sh"
+  ],
+  "allowed_roots": [
+    "Sources",
+    "Tests",
+    "tauri",
+    "Docs",
+    "scripts",
+    "agent-coops",
+    ".codex",
+    ".claude"
+  ],
+  "validation": {
+    "workflow": "python3 agent-coops/run.py check --staged",
+    "swift": "swift test",
+    "tauri": "npm --prefix tauri run check"
+  },
+  "lark": {
+    "identity": "user",
+    "tasklist_guid": "be849424-6803-4d66-a27e-e1e0d0e5b56f",
+    "base_token": "ISCLb8NtMaNKbtsVhsFcjpQznwf"
+  },
+  "permissions": "仅协作规范接入；不改产品、不取数、不安装、不发布。",
+  "legacy_task_roots": [
+    "Docs/plans",
+    "Docs/superpowers/plans"
+  ]
+}
